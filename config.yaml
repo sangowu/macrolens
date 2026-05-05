@@ -1,0 +1,61 @@
+embedding:
+  backend: online            # local_bge | local_qwen | remote | online
+
+  local_bge:
+    model_id: BAAI/bge-m3
+    device: cuda
+    dim: 1024
+
+  local_qwen:
+    model_id: Qwen/Qwen3-Embedding-0.6B
+    device: cuda
+    dim: 1024
+
+  remote:
+    base_url: http://localhost:6006
+    # ssh tunnel 由用户手动管理，factory 不自动建立
+
+  online:
+    provider: openai                          # OpenAI-compatible（ModelScope）
+    model: Qwen/Qwen3-Embedding-0.6B
+    dim: 1024
+    api_key_env: MODELSCOPE_API_KEY
+    base_url: https://ms-ens-45cccd31-f770.api-inference.modelscope.cn/v1
+
+reranker:
+  backend: online            # local | remote | online
+
+  local:
+    model_id: BAAI/bge-reranker-v2-m3
+    device: cuda
+
+  remote:
+    base_url: http://localhost:6006
+    # ssh tunnel 由用户手动管理，factory 不自动建立
+
+  online:
+    provider: dashscope
+    model: qwen3-rerank
+    api_key_env: DASHSCOPE_API_KEY
+
+db:
+  host: localhost
+  port: 5433
+  user: macrolens
+  password: macrolens
+  dbname: macrolens
+
+vector_dim: 1024              # 必须与 DDL 中 vector(N) 和所选 embedding 模型一致
+
+chunking:
+  chunk_tokens: 512
+  chunk_overlap: 128
+
+llm:
+  provider: gemini          # anthropic | gemini
+  model: gemini-3.1-flash-lite-preview    # anthropic: claude-sonnet-4-6 / gemini: gemini-3.1-flash-lite-preview
+  max_tokens: 4096
+  temperature: 0.0
+  top_k: 12                   # 每个子查询返回的最终 chunk 数
+  candidate_k: 20             # 向量/全文各自召回的候选数（RRF 前）
+  api_key_env: GEMINI_API_KEY  # 切换 gemini 时改为 GEMINI_API_KEY

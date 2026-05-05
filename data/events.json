@@ -1,0 +1,302 @@
+[
+  {
+    "event_id": "evt_001",
+    "date": "2020-03-03",
+    "category": "fed_policy",
+    "entity": "FED",
+    "severity": 5,
+    "title": "Fed emergency rate cut 50bps",
+    "description": "The Federal Reserve made an emergency inter-meeting rate cut of 50 basis points, lowering the federal funds rate to 1.00-1.25%, the first emergency cut since 2008, in response to COVID-19 economic risks.",
+    "source_url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20200303a.htm"
+  },
+  {
+    "event_id": "evt_002",
+    "date": "2020-03-15",
+    "category": "fed_policy",
+    "entity": "FED",
+    "severity": 5,
+    "title": "Fed cuts rates to zero, launches QE",
+    "description": "Federal Reserve slashed interest rates to near zero (0-0.25%) and announced $700 billion in quantitative easing, including $500B in Treasury purchases and $200B in mortgage-backed securities, to combat COVID-19 economic fallout.",
+    "source_url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20200315a.htm"
+  },
+  {
+    "event_id": "evt_003",
+    "date": "2020-03-11",
+    "category": "macro_shock",
+    "entity": "WHO",
+    "severity": 5,
+    "title": "WHO declares COVID-19 pandemic",
+    "description": "The World Health Organization officially declared COVID-19 a global pandemic, triggering widespread lockdowns, travel restrictions, and a global economic shutdown that severely disrupted supply chains and consumer demand.",
+    "source_url": "https://www.who.int/news/item/11-03-2020-who-director-general-s-opening-remarks-at-the-media-briefing-on-covid-19"
+  },
+  {
+    "event_id": "evt_004",
+    "date": "2020-04-29",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 3,
+    "title": "Google Q1 2020 earnings: first ad revenue decline",
+    "description": "Alphabet reported Q1 2020 results showing Google advertising revenue grew only 10% YoY, a sharp deceleration, with management warning of significant COVID-19 headwinds in Q2. First signs of pandemic impact on digital ad spending.",
+    "source_url": "https://abc.xyz/investor/"
+  },
+  {
+    "event_id": "evt_005",
+    "date": "2021-03-31",
+    "category": "macro_shock",
+    "entity": "US_GOV",
+    "severity": 4,
+    "title": "US $1.9T American Rescue Plan signed",
+    "description": "President Biden signed the $1.9 trillion American Rescue Plan, including $1,400 direct payments, extended unemployment benefits, and state/local aid. Massive fiscal stimulus accelerated economic recovery and boosted digital advertising demand.",
+    "source_url": "https://www.whitehouse.gov/briefing-room/legislation/2021/03/31/fact-sheet-the-american-rescue-plan-will-deliver-immediate-economic-relief-to-families/"
+  },
+  {
+    "event_id": "evt_006",
+    "date": "2021-10-04",
+    "category": "industry",
+    "entity": "META",
+    "severity": 3,
+    "title": "Facebook global outage (6-hour shutdown)",
+    "description": "Facebook, Instagram, and WhatsApp experienced a 6-hour global outage due to a BGP routing misconfiguration. The outage highlighted platform concentration risk and temporarily shifted user attention and advertiser spend toward Google properties.",
+    "source_url": "https://engineering.fb.com/2021/10/04/networking-traffic/outage/"
+  },
+  {
+    "event_id": "evt_007",
+    "date": "2022-03-16",
+    "category": "fed_policy",
+    "entity": "FED",
+    "severity": 5,
+    "title": "Fed begins rate hike cycle",
+    "description": "Federal Reserve raised rates by 25bps (first hike since 2018), beginning the most aggressive tightening cycle in 40 years to combat 8%+ inflation. Signaled six more hikes in 2022, drastically tightening financial conditions.",
+    "source_url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20220316a.htm"
+  },
+  {
+    "event_id": "evt_008",
+    "date": "2022-06-15",
+    "category": "fed_policy",
+    "entity": "FED",
+    "severity": 5,
+    "title": "Fed hikes 75bps — largest since 1994",
+    "description": "Federal Reserve raised the federal funds rate by 75 basis points, the largest single hike since 1994, as CPI hit 8.6% YoY. The aggressive tightening significantly increased recession fears and compressed tech valuations.",
+    "source_url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20220615a.htm"
+  },
+  {
+    "event_id": "evt_009",
+    "date": "2022-10-25",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 4,
+    "title": "Google Q3 2022: ad revenue misses, cloud accelerates",
+    "description": "Alphabet Q3 2022 results showed advertising revenue decline for the second consecutive quarter amid macro headwinds. However, Google Cloud revenue grew 38% YoY to $6.9B, demonstrating cloud as a resilient growth engine despite the ad slowdown.",
+    "source_url": "https://abc.xyz/investor/"
+  },
+  {
+    "event_id": "evt_010",
+    "date": "2023-01-20",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 4,
+    "title": "Google announces layoffs of 12,000 employees",
+    "description": "Alphabet CEO Sundar Pichai announced the layoff of approximately 12,000 employees (6% of global workforce), citing over-hiring during pandemic growth and the need to focus on AI priorities. The largest layoff in Alphabet's history.",
+    "source_url": "https://blog.google/inside-google/message-ceo/january-update/"
+  },
+  {
+    "event_id": "evt_011",
+    "date": "2023-02-06",
+    "category": "industry",
+    "entity": "GOOGL",
+    "severity": 5,
+    "title": "Google announces Bard AI chatbot",
+    "description": "Google announced Bard (powered by LaMDA), its response to ChatGPT, amid intense competitive pressure in AI search. A demo error caused Alphabet's stock to drop ~9% in one day, erasing ~$100B in market cap, highlighting high stakes of AI race.",
+    "source_url": "https://blog.google/technology/ai/bard-google-ai-search-updates/"
+  },
+  {
+    "event_id": "evt_012",
+    "date": "2022-11-30",
+    "category": "industry",
+    "entity": "OPENAI",
+    "severity": 5,
+    "title": "OpenAI launches ChatGPT",
+    "description": "OpenAI released ChatGPT publicly, reaching 1 million users in 5 days and 100 million in 2 months — the fastest-growing consumer application in history. Triggered an AI arms race across the tech industry and posed an existential threat to Google's search dominance.",
+    "source_url": "https://openai.com/blog/chatgpt"
+  },
+  {
+    "event_id": "evt_013",
+    "date": "2023-03-21",
+    "category": "industry",
+    "entity": "GOOGL",
+    "severity": 4,
+    "title": "Google launches Bard publicly",
+    "description": "Google opened Bard to the public in the US and UK, powered by PaLM 2. Marked Google's direct entry into the consumer AI chatbot market as competition with Microsoft Bing/ChatGPT intensified for AI-powered search market share.",
+    "source_url": "https://blog.google/technology/ai/try-bard/"
+  },
+  {
+    "event_id": "evt_014",
+    "date": "2023-05-10",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 4,
+    "title": "Google I/O 2023: AI integrated across all products",
+    "description": "At Google I/O 2023, Google announced AI integration across Search (Search Generative Experience), Gmail, Docs, Maps, and more. Unveiled PaLM 2 and Gemini project. Demonstrated commitment to AI-first strategy across the entire product portfolio.",
+    "source_url": "https://blog.google/technology/ai/google-io-2023-keynote-sundar-pichai/"
+  },
+  {
+    "event_id": "evt_015",
+    "date": "2023-07-18",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 3,
+    "title": "Google Cloud reaches profitability for first time",
+    "description": "Alphabet's Q2 2023 results showed Google Cloud achieving its first-ever operating profit of $395M (operating margin 5.3%), a major milestone after years of losses. Revenue grew 28% YoY to $8.03B, validating the cloud investment thesis.",
+    "source_url": "https://abc.xyz/investor/"
+  },
+  {
+    "event_id": "evt_016",
+    "date": "2023-09-12",
+    "category": "industry",
+    "entity": "DOJ",
+    "severity": 4,
+    "title": "DOJ antitrust trial against Google begins",
+    "description": "The U.S. Department of Justice began its landmark antitrust trial against Google, alleging the company illegally maintained its search monopoly through exclusive agreements with device makers (Apple, Samsung) worth ~$10B/year. Largest tech antitrust case since Microsoft.",
+    "source_url": "https://www.justice.gov/atr/case/us-v-google-llc-1"
+  },
+  {
+    "event_id": "evt_017",
+    "date": "2023-12-06",
+    "category": "industry",
+    "entity": "GOOGL",
+    "severity": 5,
+    "title": "Google launches Gemini AI model",
+    "description": "Google DeepMind unveiled Gemini, its most capable AI model family (Ultra, Pro, Nano), designed to be natively multimodal. Positioned as direct competitor to GPT-4. Gemini Pro integrated into Bard immediately; marked Google's most significant AI milestone.",
+    "source_url": "https://blog.google/technology/ai/google-gemini-ai/"
+  },
+  {
+    "event_id": "evt_018",
+    "date": "2024-01-30",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 3,
+    "title": "Alphabet Q4 2023: strong results, first-ever dividend announced",
+    "description": "Alphabet reported Q4 2023 revenue of $86.3B (+13% YoY), beating estimates. Google Cloud revenue reached $9.2B (+26% YoY). The company announced its first-ever cash dividend ($0.20/share) and a $70B stock buyback, signaling financial maturity.",
+    "source_url": "https://abc.xyz/investor/"
+  },
+  {
+    "event_id": "evt_019",
+    "date": "2024-05-14",
+    "category": "industry",
+    "entity": "GOOGL",
+    "severity": 4,
+    "title": "Google I/O 2024: AI Overviews launched in Search",
+    "description": "Google I/O 2024 featured AI Overviews (formerly Search Generative Experience) rolling out to all US users, fundamentally changing the Google Search experience. Also announced Gemini 1.5 Pro with 1M token context window and Project Astra for multimodal AI.",
+    "source_url": "https://blog.google/technology/ai/google-io-2024-keynote-sundar-pichai/"
+  },
+  {
+    "event_id": "evt_020",
+    "date": "2024-08-05",
+    "category": "industry",
+    "entity": "DOJ",
+    "severity": 5,
+    "title": "Judge rules Google illegally monopolized search",
+    "description": "U.S. District Judge Amit Mehta ruled that Google violated antitrust law by illegally maintaining its monopoly in the general search and text advertising markets. The ruling stated Google's exclusive default agreements with Apple and others were anticompetitive.",
+    "source_url": "https://www.justice.gov/atr/case/us-v-google-llc-1"
+  },
+  {
+    "event_id": "evt_021",
+    "date": "2022-01-18",
+    "category": "company_action",
+    "entity": "MSFT",
+    "severity": 3,
+    "title": "Microsoft announces $10B investment in OpenAI",
+    "description": "Microsoft announced a multi-year, multi-billion dollar investment in OpenAI (later confirmed at ~$10B), securing exclusive Azure cloud rights and integration rights for GPT models into Microsoft products including Bing, Office 365, and Azure OpenAI Service.",
+    "source_url": "https://news.microsoft.com/2023/01/23/microsoftandopenaiextendpartnership/"
+  },
+  {
+    "event_id": "evt_022",
+    "date": "2023-02-07",
+    "category": "industry",
+    "entity": "MSFT",
+    "severity": 4,
+    "title": "Microsoft launches AI-powered Bing",
+    "description": "Microsoft launched a new AI-powered Bing search engine and Edge browser integration powered by GPT-4, directly challenging Google's search dominance. Generated massive consumer interest with 100M+ active users within weeks.",
+    "source_url": "https://blogs.microsoft.com/blog/2023/02/07/reinventing-search-with-a-new-ai-powered-microsoft-bing-and-edge/"
+  },
+  {
+    "event_id": "evt_023",
+    "date": "2021-07-27",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 3,
+    "title": "Google Cloud crosses $5B quarterly revenue",
+    "description": "Alphabet Q2 2021 results showed Google Cloud revenue of $4.6B (+54% YoY), approaching the $5B milestone. YouTube revenue also surged to $7B. Overall revenue grew 62% YoY, the strongest quarter since 2004, driven by pandemic digital acceleration.",
+    "source_url": "https://abc.xyz/investor/"
+  },
+  {
+    "event_id": "evt_024",
+    "date": "2022-07-26",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 4,
+    "title": "Alphabet reports first revenue decline since 2020",
+    "description": "Alphabet Q2 2022 results showed total revenue fell slightly YoY for the first time since COVID in 2020. YouTube ad revenue declined 1.9% YoY. Operating income dropped 11%. Confirmed digital ad market slowdown due to macroeconomic headwinds and rising rates.",
+    "source_url": "https://abc.xyz/investor/"
+  },
+  {
+    "event_id": "evt_025",
+    "date": "2021-11-08",
+    "category": "macro_shock",
+    "entity": "FED",
+    "severity": 4,
+    "title": "Fed announces QE tapering",
+    "description": "Federal Reserve announced it would begin tapering its $120B/month asset purchase program by $15B/month, starting November 2021. Signaled the beginning of the end of pandemic-era monetary accommodation, beginning a tightening cycle that would pressure tech valuations.",
+    "source_url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20211103a.htm"
+  },
+  {
+    "event_id": "evt_026",
+    "date": "2023-07-26",
+    "category": "fed_policy",
+    "entity": "FED",
+    "severity": 3,
+    "title": "Fed hikes to 5.25-5.50% — 22-year high",
+    "description": "Federal Reserve raised rates by 25bps to 5.25-5.50%, the highest level since 2001. Fed Chair Powell signaled rates would remain restrictive for longer, maintaining pressure on valuations and corporate borrowing costs.",
+    "source_url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20230726a.htm"
+  },
+  {
+    "event_id": "evt_027",
+    "date": "2024-09-18",
+    "category": "fed_policy",
+    "entity": "FED",
+    "severity": 4,
+    "title": "Fed begins rate cut cycle with 50bps cut",
+    "description": "Federal Reserve cut interest rates by 50 basis points to 4.75-5.00%, beginning the first easing cycle since 2020. The larger-than-expected cut signaled confidence that inflation was under control and prioritized labor market support. Boosted risk asset sentiment.",
+    "source_url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20240918a.htm"
+  },
+  {
+    "event_id": "evt_028",
+    "date": "2020-07-29",
+    "category": "industry",
+    "entity": "GOOGL",
+    "severity": 3,
+    "title": "Big Tech antitrust hearing in US Congress",
+    "description": "CEOs of Apple, Amazon, Facebook, and Google testified before the House Judiciary Antitrust Subcommittee. Google CEO Sundar Pichai faced questions about search dominance and data practices. Marked escalating regulatory scrutiny of big tech platforms.",
+    "source_url": "https://judiciary.house.gov/calendar/eventsingle.aspx?EventID=3050"
+  },
+  {
+    "event_id": "evt_029",
+    "date": "2024-04-17",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 3,
+    "title": "Google lays off hundreds in hardware and cloud teams",
+    "description": "Alphabet laid off several hundred employees from its hardware (Pixel, Nest) and Google Assistant teams, as part of ongoing restructuring to redirect investment toward AI initiatives. Part of a broader industry trend of AI-driven workforce reallocation.",
+    "source_url": "https://www.bloomberg.com/news/articles/2024-04-17/google-cuts-hundreds-of-jobs-in-its-hardware-team"
+  },
+  {
+    "event_id": "evt_030",
+    "date": "2025-02-04",
+    "category": "company_action",
+    "entity": "GOOGL",
+    "severity": 4,
+    "title": "Alphabet Q4 2024: Google Cloud reaches $12B quarterly revenue",
+    "description": "Alphabet reported Q4 2024 results with total revenue of $96.5B (+12% YoY). Google Cloud revenue surged to $11.96B (+30% YoY), approaching the $12B milestone. Operating margin expanded to 32%. AI infrastructure investments reached $75B capex guidance for 2025.",
+    "source_url": "https://abc.xyz/investor/"
+  }
+]

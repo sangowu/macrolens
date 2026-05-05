@@ -1,0 +1,22 @@
+[project]
+name = "marcolens"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.97.0",
+    "fredapi>=0.5.2",
+    "google-genai>=1.74.0",
+    "gradio>=6.14.0",
+    "httpx>=0.28.1",
+    "openai>=2.34.0",
+    "pgvector>=0.4.2",
+    "psycopg[binary]>=3.3.3",
+    "pydantic>=2.13.3",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "sec-edgar-downloader>=5.1.0",
+    "sec-parser>=0.58.1",
+    "tiktoken>=0.12.0",
+    "tqdm>=4.67.3",
+]

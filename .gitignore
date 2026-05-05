@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 环境变量（含 API keys，绝不提交）
+.env
+
+# 数据目录
+data/sec_raw/
+
+# 运行时日志
+logs/
+
+# 调试临时文件
+shit.py
+
+# Claude Code 项目配置
+.claude/
+
+# 内部设计文档（不对外）
+MacroLens_Design.md
