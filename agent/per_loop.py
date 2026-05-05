@@ -83,7 +83,8 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
     if verbose:
         print("\n── Synthesizing ─────────────────────────────────────")
 
-    return synthesize(question, all_context, llm, max_tokens=cfg.llm.max_tokens)
+    answer = synthesize(question, all_context, llm, max_tokens=cfg.llm.max_tokens)
+    return answer, all_context
 
 
 def main() -> None:
@@ -108,7 +109,7 @@ def main() -> None:
     llm = create_llm_client(cfg)
 
     with psycopg.connect(cfg.db.dsn) as conn:
-        answer = run(question, cfg, conn, embedder, llm, max_iter=args.max_iter, verbose=args.verbose)
+        answer, _ = run(question, cfg, conn, embedder, llm, max_iter=args.max_iter, verbose=args.verbose)
 
     print("\n" + "=" * 60)
     print(answer)

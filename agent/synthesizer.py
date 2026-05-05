@@ -1,8 +1,12 @@
 """
 Synthesizer: 基于检索到的 context 生成最终回答。
+支持内联 <compute>...</compute> 代码块用于精确数值计算。
 """
 from __future__ import annotations
 
+import re
+
+from agent.tools.code_executor import execute_python
 from models.llm.base import LLMClient
 
 SYSTEM_PROMPT = """\
@@ -20,7 +24,40 @@ Answer in clear, structured prose. Cite sources using [n] notation matching the 
 Rules:
 1. Every specific number, date, percentage, and causal claim MUST be directly supported by a cited source [n]. If you cannot point to a source, do not make the claim.
 2. If specific information is not present in the context, explicitly say: "The provided context does not contain [X]." Do NOT infer, estimate, or extrapolate beyond what is explicitly stated.
-3. If the context is insufficient for a complete answer, answer only the parts that are supported, then list what is missing."""
+3. If the context is insufficient for a complete answer, answer only the parts that are supported, then list what is missing.
+
+COMPUTATION TOOL:
+When the question requires a derived metric (growth rate, CAGR, sum, correlation, change in basis points) that is NOT directly stated in the context, embed a compute block inline:
+
+<compute>data={'r21':182.5,'r22':224.5}; result=(data['r22']/data['r21']-1)*100; print(f'{result:.1f}%')</compute>
+
+Rules for <compute> blocks:
+- Pre-injected names (no import needed): pd, np, math, statistics, datetime, data
+- NEVER write import statements inside the block
+- Always call print() with the formatted result — the print output replaces the tag
+- Only use numbers explicitly found in the context above
+- Keep blocks to a single line or use semicolons for multi-statement
+
+Example: "Advertising revenue grew <compute>data={'r21':182.5,'r22':224.5}; result=(data['r22']/data['r21']-1)*100; print(f'{result:.1f}%')</compute> year-over-year [1][3]."
+"""
+
+_COMPUTE_RE = re.compile(r"<compute>(.*?)</compute>", re.DOTALL)
+
+
+def _resolve_compute_blocks(text: str) -> str:
+    def _run(match: re.Match) -> str:
+        code = match.group(1).strip()
+        res = execute_python(code)
+        if res["error"]:
+            return f"[computation error: {res['error']}]"
+        output = res["stdout"].strip()
+        if output:
+            return output
+        if res["result"] is not None:
+            return str(res["result"])
+        return "[no output]"
+
+    return _COMPUTE_RE.sub(_run, text)
 
 
 def _format_context(context: list[dict]) -> str:
@@ -41,4 +78,14 @@ def synthesize(question: str, context: list[dict], llm: LLMClient, max_tokens: i
     context_text = _format_context(context)
     user_msg = f"Context:\n{context_text}\n\nQuestion: {question}"
 
-    return llm.chat(system=SYSTEM_PROMPT, messages=[{"role": "user", "content": user_msg}], max_tokens=max_tokens, temperature=0.0)
+    raw = llm.chat(
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_msg}],
+        max_tokens=max_tokens,
+        temperature=0.0,
+    )
+
+    if "<compute>" in raw:
+        raw = _resolve_compute_blocks(raw)
+
+    return raw
