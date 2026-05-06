@@ -38,12 +38,14 @@ Rules for <compute> blocks:
 - Pre-injected names (no import needed): pd, np, math, statistics, datetime, data
 - NEVER write import statements inside the block
 - Always call print() with a self-contained formatted result including units (e.g. "$580,894 million", "7.2%", "402 bps")
-- The print output replaces the entire <compute>...</compute> tag inline — so the tag MUST be embedded inside a sentence, never on its own line
+- The print output replaces the entire <compute>...</compute> tag inline — the tag MUST sit inside a sentence with words before AND after it
+- NEVER place <compute> at the end of a paragraph, after a period, or on its own line
+- After a <compute> block produces a result, use ONLY that result in all later references — never restate a different number
 - Only use numbers explicitly found in the context above
 - Keep blocks to a single line or use semicolons for multi-statement
 
-CORRECT:   "Combined revenue was <compute>print(f'${146924+209497+224473:,} million')</compute> [1][2][3]."
-INCORRECT: list the numbers, then put <compute> on a separate line, then restate in prose — this creates duplicate output.
+CORRECT:   "The 2020 operating margin was <compute>print(f'{54606/168635*100:.1f}%')</compute> [1], rising to ..."
+INCORRECT: "Operating income was $54,606M ...\n<compute>...</compute>\nThe margin was 32.4%"  ← tag on own line + duplicate
 """
 
 _COMPUTE_RE = re.compile(r"<compute>(.*?)</compute>", re.DOTALL)
@@ -51,6 +53,7 @@ _COMPUTE_RE = re.compile(r"<compute>(.*?)</compute>", re.DOTALL)
 
 def _resolve_compute_blocks(text: str) -> str:
     call_count = 0
+    computed_results: list[str] = []
 
     def _run(match: re.Match) -> str:
         nonlocal call_count
@@ -63,12 +66,48 @@ def _resolve_compute_blocks(text: str) -> str:
         output = res["stdout"].strip()
         result = output if output else str(res["result"]) if res["result"] is not None else "[no output]"
         logger.info("[COMPUTE #%d] code: %s => %s", call_count, code[:120], result)
+        computed_results.append(result)
         return result
 
     resolved = _COMPUTE_RE.sub(_run, text)
+
     if call_count == 0:
         logger.debug("[COMPUTE] no compute blocks in this response")
+    elif computed_results:
+        resolved = _remove_orphaned_results(resolved, computed_results)
+
     return resolved
+
+
+def _remove_orphaned_results(text: str, results: list[str]) -> str:
+    """删除独立成段的 compute 结果行（被空行包围且内容就是计算结果）。
+
+    LLM 常把 <compute> 放在段落之间，输出替换后变成:
+        ...(上文)...
+
+        15.3%          ← 孤立行，后面的句子会重复同一个数字
+
+        Google's CAGR was 15.3%...
+    直接删掉孤立行，保留后面完整的句子。
+    """
+    result_set = set(results)
+    lines = text.split("\n")
+    cleaned: list[str] = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped in result_set:
+            prev_blank = i == 0 or not lines[i - 1].strip()
+            next_blank = i == len(lines) - 1 or not lines[i + 1].strip()
+            if prev_blank and next_blank:
+                # 跳过这行孤立结果，同时吃掉紧随其后的空行
+                i += 1
+                if i < len(lines) and not lines[i].strip():
+                    i += 1
+                continue
+        cleaned.append(lines[i])
+        i += 1
+    return "\n".join(cleaned)
 
 
 def _format_context(context: list[dict]) -> str:
