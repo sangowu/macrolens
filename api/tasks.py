@@ -2,7 +2,7 @@
 MacroLens Task API
 
 启动方式:
-    uv run uvicorn api.tasks:app --reload --port 8080
+    uv run uvicorn api.tasks:app --reload --port 7878
 
 端点:
     POST /api/tasks          提交分析任务

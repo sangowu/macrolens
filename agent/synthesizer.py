@@ -4,10 +4,13 @@ Synthesizer: 基于检索到的 context 生成最终回答。
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from agent.tools.code_executor import execute_python
 from models.llm.base import LLMClient
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 You are MacroLens, a financial research assistant specializing in Alphabet/Google (GOOGL) and US macroeconomics.
@@ -34,30 +37,38 @@ When the question requires a derived metric (growth rate, CAGR, sum, correlation
 Rules for <compute> blocks:
 - Pre-injected names (no import needed): pd, np, math, statistics, datetime, data
 - NEVER write import statements inside the block
-- Always call print() with the formatted result — the print output replaces the tag
+- Always call print() with a self-contained formatted result including units (e.g. "$580,894 million", "7.2%", "402 bps")
+- The print output replaces the entire <compute>...</compute> tag inline — so the tag MUST be embedded inside a sentence, never on its own line
 - Only use numbers explicitly found in the context above
 - Keep blocks to a single line or use semicolons for multi-statement
 
-Example: "Advertising revenue grew <compute>data={'r21':182.5,'r22':224.5}; result=(data['r22']/data['r21']-1)*100; print(f'{result:.1f}%')</compute> year-over-year [1][3]."
+CORRECT:   "Combined revenue was <compute>print(f'${146924+209497+224473:,} million')</compute> [1][2][3]."
+INCORRECT: list the numbers, then put <compute> on a separate line, then restate in prose — this creates duplicate output.
 """
 
 _COMPUTE_RE = re.compile(r"<compute>(.*?)</compute>", re.DOTALL)
 
 
 def _resolve_compute_blocks(text: str) -> str:
+    call_count = 0
+
     def _run(match: re.Match) -> str:
+        nonlocal call_count
+        call_count += 1
         code = match.group(1).strip()
         res = execute_python(code)
         if res["error"]:
+            logger.warning("[COMPUTE #%d] error: %s | code: %s", call_count, res["error"], code[:120])
             return f"[computation error: {res['error']}]"
         output = res["stdout"].strip()
-        if output:
-            return output
-        if res["result"] is not None:
-            return str(res["result"])
-        return "[no output]"
+        result = output if output else str(res["result"]) if res["result"] is not None else "[no output]"
+        logger.info("[COMPUTE #%d] code: %s => %s", call_count, code[:120], result)
+        return result
 
-    return _COMPUTE_RE.sub(_run, text)
+    resolved = _COMPUTE_RE.sub(_run, text)
+    if call_count == 0:
+        logger.debug("[COMPUTE] no compute blocks in this response")
+    return resolved
 
 
 def _format_context(context: list[dict]) -> str:

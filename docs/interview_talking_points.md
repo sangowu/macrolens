@@ -136,8 +136,44 @@ LangChain 的抽象层会把这些调试路径全部遮住。
 
 ---
 
+## TP-10：为什么用 Code Executor 而不是让 LLM 直接计算？
+
+**决策**：LLM 做多步数值计算是幻觉的高发区。Synthesizer 之前 faithfulness=0 的案例中，有一类就是 LLM 从 context 拿到正确的数字，但在脑子里算错了增长率。
+
+**修复**：Synthesizer 生成 `<compute>` 块，由沙箱 Python 执行，print 输出内联替换标签。
+
+```
+"Revenue grew <compute>data={'r21':182.5,'r22':224.5}; result=(data['r22']/data['r21']-1)*100; print(f'{result:.1f}%')</compute> YoY"
+↓ executed
+"Revenue grew 7.2% YoY"
+```
+
+**数据**：每个派生数字有两层保障——来源 citation `[n]` + 可执行代码。计算结果可独立验证，不依赖 LLM 推理。
+
+**沙箱设计**：白名单 builtins，预注入 `pd/np/math/statistics`，禁止 `import`，15s 超时。
+
+**反方**：增加了 prompt 复杂度，LLM 需要判断何时该用 `<compute>`。但金融场景的计算边界清晰（出现增长率/CAGR/基点变化时必须用），LLM 的判断相对稳定。
+
+---
+
+## TP-11：Async Task Agent + Research Memory
+
+**决策**：聊天模式是无状态的 Q&A；Task 模式引入了两个不同的能力——
+
+**异步任务**：用户提交问题 → PostgreSQL tasks 表 → Worker 后台执行 PER Loop → 生成结构化 markdown 报告。`SELECT FOR UPDATE SKIP LOCKED` 支持多 worker 并发不重复。
+
+**Research Memory**：任务完成后，LLM 提取 2-4 条关键 finding 存入 `research_memory`（pgvector embedding）。下次任务开始时，similarity search 召回相关历史发现，注入到 Planner context。
+
+**效果**：
+- 第一次问"2022 FEDFUNDS 变化"→ 存储 finding："FEDFUNDS rose from 0.08% to 4.1%，402 bps"
+- 第二次问"加息对 Google 广告的影响"→ 自动注入上一条记忆，Planner 有额外上下文
+
+**反方**：没有用 LangGraph / Mem0 等框架，纯手写任务队列和 memory 层。原因：PER Loop 是有界的 4 步流程，不需要复杂图结构；memory 是领域定制的结构化存储，通用框架反而控制力弱。自己搭更容易在面试里解释每一行在做什么。
+
+---
+
 ## 一分钟 Elevator Pitch
 
 > 面试开场或 HR 初面用
 
-"MacroLens 是一个专注于 GOOGL 财报和美国宏观经济的 RAG Agent。区别于普通 RAG 系统，它有三个设计亮点：第一，三路混合检索——SEC 财报用向量+全文 RRF fusion，宏观数据用精确 SQL，都在 PostgreSQL 里完成；第二，PER Loop 多轮充分性验证，Critic 判断 context 不够时驱动 Planner 生成不同维度的子查询，而不是重复搜索；第三，完整的评测体系，包含 chunk 策略消融实验和 RAGAS 端到端评估，有具体数字支撑每个设计决策。"
+"MacroLens 是一个专注于 GOOGL 财报和美国宏观经济的研究 Agent，有别于普通 RAG 聊天机器人。核心差异有三点：第一，答案里的每个数字都有两层验证——SEC 文档的引用标注，加上可执行的 Python 代码；增长率、CAGR、基点变化都是代码算出来的，不是 LLM 推理的。第二，异步任务模式——用户提交分析任务，Agent 在后台自主执行，生成结构化 markdown 报告，而不是即时聊天回复。第三，跨会话研究记忆——每次任务完成后提取关键发现存入向量数据库，下次任务自动召回相关历史，Agent 有认知连续性。整个系统纯 Python，没有 LangChain，每个组件独立可测，有 RAGAS 端到端评测数字支撑设计决策。"

@@ -1,46 +1,106 @@
 # MacroLens
 
-> A financial RAG agent for GOOGL SEC filings + US macroeconomic data, featuring hybrid retrieval, multi-turn sufficiency validation, and a full evaluation framework.
+> A financial research agent for GOOGL SEC filings + US macroeconomic data, featuring hybrid retrieval, async task execution, code-verified computation, and cross-session research memory.
 
 ---
 
 ## Architecture
 
 ```
-User Question
-     │
-     ▼
-┌─────────────┐
-│   Planner   │  LLM decomposes question into 1-4 structured sub-queries
-│             │  (sources: sec_chunks / events / macro_indicators)
-└──────┬──────┘
-       │ sub-queries
-       ▼
-┌─────────────┐
-│  Executor   │  Pure SQL — no LLM call
-│             │
-│  sec_chunks ├─ pgvector cosine ─┐
-│             ├─ tsvector FTS    ─┼─ RRF fusion → top-k chunks
-│             │                   │
-│  events     ├─ pgvector cosine ─┤
-│             ├─ tsvector FTS    ─┘
-│             │
-│  macro_indicators ── exact SQL (series_id + date range)
-└──────┬──────┘
-       │ context (deduplicated across iterations)
-       ▼
-┌─────────────┐
-│   Critic    │  LLM judges sufficiency → (is_sufficient, missing_hint)
-└──────┬──────┘
-       │ insufficient? → back to Planner with missing_hint + already_searched
-       │ sufficient or max_iter reached?
-       ▼
-┌─────────────┐
-│ Synthesizer │  LLM generates answer with [n] citation notation
-└─────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Chat Mode (synchronous)    Task Mode (async)           │
+│  Gradio UI :7860            FastAPI :7878                │
+└────────────┬────────────────────────┬────────────────────┘
+             │                        │ POST /api/tasks
+             │                   ┌────▼─────┐
+             │                   │  tasks   │ PostgreSQL
+             │                   │  table   │
+             │                   └────┬─────┘
+             │                        │ Worker polls
+             └────────────┬───────────┘
+                          ▼
+             ┌────────────────────────┐
+             │   Memory Retrieval     │ pgvector similarity
+             │   research_memory      │ inject prior findings
+             └────────────┬───────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│                    PER Loop                             │
+│                                                         │
+│  Planner  →  LLM decomposes question into 1-4 sub-      │
+│              queries (anti-repeat: already_searched)    │
+│      ↓                                                  │
+│  Executor →  Pure SQL, no LLM call                      │
+│   sec_chunks  ── pgvector cosine ──┐                    │
+│              ── tsvector FTS    ───┼── RRF fusion        │
+│   events      ── pgvector cosine ──┤                    │
+│              ── tsvector FTS    ───┘                    │
+│   macro_indicators ── exact SQL (series + date range)   │
+│      ↓                                                  │
+│  Critic   →  LLM judges sufficiency → refine up to 3×   │
+│      ↓                                                  │
+│  Synthesizer → answer with [n] citations                │
+│              → <compute> blocks for derived metrics     │
+│                 (executed by Code Executor, not LLM)    │
+└────────────────────────┬────────────────────────────────┘
+                         ↓
+             ┌───────────────────────┐
+             │   Report Writer       │ structured markdown
+             │   Memory Extractor    │ findings → pgvector
+             └───────────────────────┘
 ```
 
 **PER Loop**: Plan → Execute → Critique → (refine up to 3×) → Synthesize
+
+---
+
+## Key Features
+
+### Hybrid Retrieval (SEC + Events)
+
+```sql
+WITH semantic AS (
+    SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $vec) AS sem_rank
+    FROM sec_chunks WHERE fiscal_year = $year LIMIT 20
+),
+lexical AS (
+    SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(content_tsv, query) DESC) AS lex_rank
+    FROM sec_chunks WHERE content_tsv @@ $query LIMIT 20
+)
+SELECT id, 1.0/(60+sem_rank) + 1.0/(60+lex_rank) AS rrf_score
+FROM semantic FULL OUTER JOIN lexical USING (id)
+ORDER BY rrf_score DESC LIMIT 12
+```
+
+### Code Executor
+
+Derived metrics (growth rates, CAGR, basis point changes) are computed by executed Python code, not by LLM inference. The Synthesizer embeds `<compute>` blocks inline; the executor replaces them with verified results.
+
+```
+Answer: "Advertising revenue grew <compute>...</compute> YoY"
+         ↓ executed
+Answer: "Advertising revenue grew 7.2% YoY"
+```
+
+Sandbox: whitelisted builtins, pre-injected `pd`, `np`, `math`, `statistics`. No `import` allowed. 15s timeout.
+
+### Async Task Agent
+
+```
+POST /api/tasks {"question": "..."}  →  {"task_id": "uuid", "status": "pending"}
+
+Background worker:
+  1. Retrieve relevant memories (pgvector)
+  2. Run PER Loop
+  3. Write structured markdown report → tasks.report_md
+  4. Extract key findings → research_memory
+
+GET /api/tasks/{id}  →  {"status": "completed", "report_md": "..."}
+```
+
+### Research Memory
+
+After each task, an LLM call extracts 2-4 key findings and stores them as vector embeddings. Future tasks retrieve relevant prior findings via similarity search and inject them into the planning context — giving the agent continuity across sessions.
 
 ---
 
@@ -54,36 +114,6 @@ User Question
 
 ---
 
-## Retrieval Design
-
-### Hybrid Search (SEC + Events)
-
-```sql
-WITH semantic AS (
-    SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $vec) AS sem_rank
-    FROM sec_chunks WHERE fiscal_year = $year
-    LIMIT 20
-),
-lexical AS (
-    SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(content_tsv, query) DESC) AS lex_rank
-    FROM sec_chunks WHERE content_tsv @@ $query
-    LIMIT 20
-)
-SELECT id, 1.0/(60+sem_rank) + 1.0/(60+lex_rank) AS rrf_score
-FROM semantic FULL OUTER JOIN lexical USING (id)
-ORDER BY rrf_score DESC LIMIT 12
-```
-
-- **Semantic**: pgvector cosine similarity (Qwen3-Embedding-0.6B, dim=1024)
-- **Lexical**: PostgreSQL tsvector full-text search
-- **Fusion**: Reciprocal Rank Fusion (k=60)
-
-### Macro Indicators
-
-Exact SQL query — no vector search needed for numerical time-series data.
-
----
-
 ## Evaluation Results
 
 ### Chunk Strategy Ablation (3 most recent 10-K filings, Set A questions)
@@ -94,21 +124,15 @@ Exact SQL query — no vector search needed for numerical time-series data.
 | Recursive | 0.016 | 0.250 | 516 |
 | Semantic (threshold=0.75) | 0.000 | **0.375** | 198 |
 
-Fixed sliding window selected: uniform chunk size → stable RRF ranking.
-
 ### RAGAS End-to-End Evaluation
 
-| Metric | Set A (factual) | Set B (temporal) | Set C (analytical) |
-|--------|----------------|-----------------|-------------------|
-| RAGAS avg | 0.654 | 0.395 | 0.602 |
-| Faithfulness | improved after prompt hardening | — | — |
+| Model | Set A (factual) | Set B (temporal) | Set C (analytical) |
+|-------|----------------|-----------------|-------------------|
+| BGE-M3 (remote) | 0.669 | 0.420 | 0.667 |
+| Qwen3-Embedding-0.6B (online) | 0.654 | 0.395 | 0.602 |
 
-### Embedding Model Comparison
-
-| Model | Set A | Set B | Set C | Notes |
-|-------|-------|-------|-------|-------|
-| BGE-M3 (remote) | 0.669 | 0.420 | 0.667 | Best quality |
-| Qwen3-Embedding-0.6B (online) | 0.654 | 0.395 | 0.602 | No SSH tunnel needed |
+Faithfulness improved +0.024–0.031 after hardening Synthesizer prompt to mandatory citation rules.  
+Set B improved +0.029 after adding `already_searched` anti-repeat to Planner.
 
 ---
 
@@ -122,6 +146,8 @@ Fixed sliding window selected: uniform chunk size → stable RRF ranking.
 | Vector DB | PostgreSQL 17 + pgvector (HNSW index) |
 | Full-text | PostgreSQL tsvector (GIN index) |
 | Agent | Pure Python (no LangChain) |
+| Task Queue | PostgreSQL + asyncio worker (SELECT FOR UPDATE SKIP LOCKED) |
+| API | FastAPI |
 | UI | Gradio |
 | Evaluation | RAGAS + custom ablation framework |
 
@@ -133,7 +159,7 @@ Fixed sliding window selected: uniform chunk size → stable RRF ranking.
 
 - Python 3.11+
 - Docker (for PostgreSQL)
-- API keys: Gemini, ModelScope, DashScope
+- API keys: Gemini, ModelScope, DashScope, FRED
 
 ### Setup
 
@@ -152,14 +178,15 @@ docker run -d --name macrolens-pg \
 
 # 3. Configure
 cp .env.example .env   # fill in API keys
-# edit config.yaml if needed
 
 # 4. Initialize DB
 uv run python -c "
 import psycopg
 conn = psycopg.connect('postgresql://macrolens:macrolens@localhost:5433/macrolens')
 conn.autocommit = True
-conn.cursor().execute(open('migrations/001_init.sql').read())
+for f in ['migrations/001_init.sql', 'migrations/002_tasks_memory.sql']:
+    conn.cursor().execute(open(f).read())
+print('DB ready')
 "
 
 # 5. Ingest data
@@ -167,19 +194,20 @@ uv run ingestion/ingest_sec.py --ingest-only
 uv run ingestion/ingest_fred.py
 uv run ingestion/ingest_events.py
 
-# 6. Launch UI
-uv run ui/app.py
-# Open http://localhost:7860
+# 6. Launch (three terminals)
+uv run ui/app.py                                    # Gradio UI  :7860
+uv run uvicorn api.tasks:app --port 7878            # Task API   :7878
+uv run worker/task_worker.py --verbose              # Worker
 ```
 
-### CLI Usage
+### CLI
 
 ```bash
 uv run agent/per_loop.py "How did Fed rate hikes in 2022 affect Google's advertising revenue?"
 uv run agent/per_loop.py --max-iter 3 --verbose "What are Google's main risk factors in 2023?"
 ```
 
-### Run Evaluation
+### Evaluation
 
 ```bash
 uv run eval/run_eval.py --sets A B C
@@ -193,38 +221,47 @@ uv run eval/chunk_ablation.py --files 3
 ```
 macrolens/
 ├── agent/
-│   ├── planner.py       # LLM decomposes question → sub-queries
-│   ├── executor.py      # Hybrid retrieval (RRF SQL)
-│   ├── critic.py        # Sufficiency judge
-│   ├── synthesizer.py   # Citation-grounded answer generation
-│   └── per_loop.py      # PER Loop orchestration
+│   ├── planner.py         # LLM decomposes question → sub-queries
+│   ├── executor.py        # Hybrid retrieval (RRF SQL)
+│   ├── critic.py          # Sufficiency judge
+│   ├── synthesizer.py     # Citation-grounded answer + <compute> blocks
+│   ├── per_loop.py        # PER Loop orchestration
+│   ├── report_writer.py   # Formats markdown research report
+│   ├── memory.py          # Research memory: extract findings + retrieve
+│   └── tools/
+│       └── code_executor.py  # Sandboxed Python execution
+├── api/
+│   └── tasks.py           # FastAPI: POST/GET /api/tasks
+├── worker/
+│   └── task_worker.py     # Async polling worker
 ├── ingestion/
-│   ├── ingest_sec.py    # SEC EDGAR → sec_chunks
-│   ├── ingest_fred.py   # FRED API → macro_indicators
-│   ├── ingest_events.py # events.json → events
-│   └── chunkers.py      # Fixed / Recursive / Semantic chunkers
+│   ├── ingest_sec.py      # SEC EDGAR → sec_chunks
+│   ├── ingest_fred.py     # FRED API → macro_indicators
+│   ├── ingest_events.py   # events.json → events
+│   └── chunkers.py        # Fixed / Recursive / Semantic chunkers
 ├── models/
-│   ├── base.py          # EmbeddingBackend / RerankerBackend Protocol
-│   ├── factory.py       # Backend factory (local / remote / online)
-│   ├── embedding/       # local_bge, local_qwen, remote, online
-│   └── reranker/        # local, remote, online (Cohere / DashScope)
+│   ├── base.py            # EmbeddingBackend / RerankerBackend Protocol
+│   ├── factory.py         # Backend factory (local / remote / online)
+│   ├── embedding/         # local_bge, local_qwen, remote, online
+│   └── reranker/          # local, remote, online (DashScope / Cohere)
 ├── eval/
-│   ├── run_eval.py      # RAGAS evaluation runner
+│   ├── run_eval.py        # RAGAS evaluation runner
 │   ├── chunk_ablation.py
-│   ├── questions.py     # Evaluation question sets (A/B/C)
-│   └── metrics.py       # context_precision / context_recall
+│   ├── questions.py       # Evaluation question sets (A/B/C)
+│   └── metrics.py         # context_precision / context_recall
 ├── ui/
-│   └── app.py           # Gradio UI
+│   └── app.py             # Gradio UI (Chat tab + Analysis Task tab)
 ├── migrations/
-│   └── 001_init.sql     # PostgreSQL schema
+│   ├── 001_init.sql       # Core schema (sec_chunks, events, macro_indicators)
+│   └── 002_tasks_memory.sql  # tasks + research_memory tables
 ├── data/
-│   └── events.json      # Hand-curated event timeline
+│   └── events.json        # Hand-curated event timeline
 ├── docs/
-│   ├── failure_analysis.md   # 12 bugs + optimizations with root causes
+│   ├── failure_analysis.md
 │   └── interview_talking_points.md
 ├── cloud_server/
-│   └── server.py        # FastAPI inference server (for remote backend)
-└── config.yaml          # Single source of truth for all configuration
+│   └── server.py          # FastAPI inference server (remote embedding)
+└── config.yaml            # Single source of truth for all configuration
 ```
 
 ---
@@ -235,13 +272,19 @@ macrolens/
 Financial RAG requires time filtering + exact numerical queries + vector search in the same transaction. pgvector enables all three without data synchronization complexity.
 
 **Why PER Loop over ReAct?**
-Financial Q&A is a closed domain. PER Loop's fixed structure (3 LLM calls minimum) is more predictable and cheaper than ReAct's open-ended tool use (10+ calls).
+Financial Q&A is a closed domain. PER Loop's fixed structure (3 LLM calls minimum) is more predictable and cheaper than ReAct's open-ended tool use.
+
+**Why Code Executor instead of LLM arithmetic?**
+LLM arithmetic on multi-year financial data is a hallucination risk. The Code Executor moves computation into deterministic Python — every derived number in the answer is verifiable by the code shown.
+
+**Why custom task queue over LangGraph?**
+The PER Loop is a bounded 4-step pipeline, not a complex graph. A PostgreSQL task table + asyncio worker is simpler, fully observable, and consistent with the "independently testable components" philosophy.
 
 **Why no LangChain?**
-Every component is independently testable. The retrieval SQL, the Planner prompt, and the Critic logic can each be evaluated in isolation — LangChain abstractions would obscure this.
+Every component is independently testable. The retrieval SQL, Planner prompt, Critic logic, and Code Executor can each be evaluated in isolation.
 
 **Why Fixed chunking over Semantic?**
-Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform chunk sizes that produce stable RRF rankings. Semantic chunking's 4× chunk count inflates retrieval noise.
+Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform chunk sizes that produce stable RRF rankings.
 
 ---
 
@@ -250,9 +293,11 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 12 documented bugs and optimizations in [`docs/failure_analysis.md`](docs/failure_analysis.md), including:
 
 - `sec-parser` returning 3.8M empty nodes → replaced with BeautifulSoup + regex
-- Synthesizer hallucination (faithfulness=0) → hardened to mandatory [n] citation rules
-- Planner repeating identical sub-queries across iterations → added `already_searched` list to prompt
-- Chunk ablation scoring 0 due to year mismatch → reversed sort order to select most recent filings
+- Synthesizer hallucination (faithfulness=0) → hardened to mandatory `[n]` citation rules
+- Planner repeating identical sub-queries → added `already_searched` list to prompt
+- Chunk ablation scoring 0 due to year mismatch → reversed sort to select most recent filings
+- Critic dead loop → anti-repeat fixed Set B +0.029
+- `<compute>` output appearing as isolated line → prompt fix to require inline embedding
 
 ---
 
