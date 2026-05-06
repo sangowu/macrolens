@@ -37,7 +37,7 @@ When the question requires a derived metric (growth rate, CAGR, sum, correlation
 Rules for <compute> blocks:
 - Pre-injected names (no import needed): pd, np, math, statistics, datetime, data
 - NEVER write import statements inside the block
-- Always call print() with a self-contained formatted result including units (e.g. "$580,894 million", "7.2%", "402 bps")
+- Always call print() with a self-contained formatted result. Include units ONLY if the surrounding sentence does not already supply them (e.g. use "7.2%" not "7.2% growth"; use "$580,894 million" not just "580894")
 - The print output replaces the entire <compute>...</compute> tag inline — the tag MUST sit inside a sentence with words before AND after it
 - NEVER place <compute> at the end of a paragraph, after a period, or on its own line
 - After a <compute> block produces a result, use ONLY that result in all later references — never restate a different number
