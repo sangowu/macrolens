@@ -148,20 +148,21 @@ ORDER BY mi.date
 
 ---
 
-## 第 5 步：Critic（LLM 调用 #2）
+## 第 5 步：Critic（LLM 调用 #2 · Tool Use）
 
 `agent/critic.py → critique()`
 
-把原始问题 + 当前所有 context 发给 LLM，判断：
+把原始问题 + 当前所有 context 发给 LLM，通过 **Tool Use** 强制返回结构化判断：
 
-> 现有 context 能否充分回答这个问题？如果不能，缺什么？
-
-返回 `(is_sufficient: bool, missing_hint: str)`。
+```python
+tool_choice={"type": "tool", "name": "judge_sufficiency"}
+# 返回: {"is_sufficient": true/false, "missing": "缺少什么"}
+```
 
 - `is_sufficient=True` → 跳出循环，进入 Synthesizer
 - `is_sufficient=False` → 把 `missing_hint` 和 `searched_queries` 一起带回第 3 步
 
-最多循环 3 次。
+最多循环 3 次。与 Planner 一样，Tool Use 保证输出格式合法，不再依赖正则解析 JSON。
 
 ---
 
@@ -265,12 +266,12 @@ items = [(i, item) for i, item in enumerate(context, 1) if i in cited]
 | 阶段 | 调用次数 | 方式 | temperature |
 |------|----------|------|-------------|
 | Planner | 最多 3 次 | Tool Use（结构化输出） | 0.0 |
-| Critic | 最多 3 次 | chat | 0.0 |
+| Critic | 最多 3 次 | Tool Use（结构化输出） | 0.0 |
 | Synthesizer（写答案） | 1 次（含多轮 compute tool call） | Agentic loop | 0.0 |
 | Memory 提取 | 1 次（Task 模式） | Tool Use（结构化输出） | 0.0 |
 | **合计** | **3–8 次** | | |
 
-Sources 面板过滤为纯脚本处理，不调 LLM。
+Executor（SQL）、Code Executor（Python 沙箱）、Sources 面板过滤均不调 LLM。
 
 Executor（SQL）和 Code Executor（Python 沙箱）不调 LLM。
 
@@ -281,10 +282,11 @@ Executor（SQL）和 Code Executor（Python 沙箱）不调 LLM。
 | 模块 | 旧版 | 新版 |
 |------|------|------|
 | Planner 输出解析 | 正则 + `json.loads` | Tool Use，直接取 dict |
-| Synthesizer 输入 | 全量 context | 全量 context（不变） |
+| Planner filters schema | 无约束，macro series 经常漏填 | 明确定义各字段 + keyword fallback |
+| Critic 输出解析 | 正则 + `json.loads` | Tool Use，直接取 dict |
 | 计算触发 | `<compute>` 标签 + 正则提取 + 事后替换 | compute tool agentic loop，结果直接内联 |
 | 孤立行清理 | `_remove_orphaned_results()` | 不再需要 |
 | Memory 提取 | 正则 + `json.loads` | Tool Use，直接取 dict |
 | 引用验证 | 无 | `_validate_citations()` 兜底检查 |
 | Sources 面板 | 展示全量检索结果 | 脚本按 `[n]` 过滤，只展示被引用的 |
-| Macro series 格式 | 只接受列表 | 自动兼容字符串和列表 |
+| Macro series 格式 | 只接受列表，格式错误静默返回空 | 自动转列表 + keyword fallback 兜底 |

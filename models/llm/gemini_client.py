@@ -61,7 +61,12 @@ class GeminiClient:
             ),
         )
 
-        for part in resp.candidates[0].content.parts:
+        if not resp.candidates:
+            return {}
+        content = resp.candidates[0].content
+        if content is None:
+            return {}
+        for part in (content.parts or []):
             if part.function_call:
                 return dict(part.function_call.args)
         return {}
@@ -91,18 +96,22 @@ class GeminiClient:
                 ),
             )
 
+            if not resp.candidates:
+                break
             candidate = resp.candidates[0]
+            if candidate.content is None:
+                break
             contents.append(candidate.content)
 
-            function_calls = [p for p in candidate.content.parts if p.function_call]
+            parts = candidate.content.parts or []
+            function_calls = [p for p in parts if p.function_call]
 
             if not function_calls:
                 return "".join(
-                    p.text for p in candidate.content.parts
-                    if hasattr(p, "text") and p.text
+                    p.text for p in parts if hasattr(p, "text") and p.text
                 ).strip()
 
-            # 执行所有 function calls，把结果发回
+            # 沙箱执行 function calls，把结果发回 LLM
             result_parts = []
             for part in function_calls:
                 fc = part.function_call
@@ -117,9 +126,9 @@ class GeminiClient:
             contents.append(types.Content(role="user", parts=result_parts))
 
         # 超过 max_turns，返回最后一轮的文本
-        last = contents[-1]
+        last_parts = (contents[-1].parts or []) if contents else []
         return "".join(
-            p.text for p in last.parts if hasattr(p, "text") and p.text
+            p.text for p in last_parts if hasattr(p, "text") and p.text
         ).strip()
 
 

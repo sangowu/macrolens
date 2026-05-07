@@ -35,9 +35,9 @@
 │              ── tsvector FTS    ───┼── RRF fusion        │
 │   events      ── pgvector cosine ──┤                    │
 │              ── tsvector FTS    ───┘                    │
-│   macro_indicators ── exact SQL (series + date range)   │
+│   macro_indicators ── exact SQL + keyword fallback      │
 │      ↓                                                  │
-│  Critic   →  LLM judges sufficiency → refine up to 3×   │
+│  Critic   →  Tool Use → sufficiency judgment            │
 │      ↓                                                  │
 │  Synthesizer → Step 1: Tool Use selects evidence IDs    │
 │              → Step 2: agentic loop writes answer       │
@@ -288,7 +288,7 @@ Financial RAG requires time filtering + exact numerical queries + vector search 
 Financial Q&A is a closed domain. PER Loop's fixed structure (3 LLM calls minimum) is more predictable and cheaper than ReAct's open-ended tool use.
 
 **Why Tool Use for structured output instead of regex?**
-Planner and Memory Extractor previously parsed LLM output with `re` + `json.loads`, which fails silently when the LLM adds surrounding text or produces malformed JSON. Tool Use with `tool_choice` forces the LLM to fill a validated schema — format errors are impossible.
+Planner, Critic, and Memory Extractor previously parsed LLM output with `re` + `json.loads`, which fails silently when the LLM adds surrounding text or produces malformed JSON. Tool Use with `tool_choice` forces the LLM to fill a validated schema — format errors are impossible.
 
 **Why send full context to Synthesizer instead of pre-filtering?**
 Financial report chunks are highly uniform — all contain dense numbers and financial terminology. A separate filtering step forces the LLM to judge relevance before seeing the answer, which is harder than finding the answer directly. The Synthesizer's LLM naturally ignores irrelevant chunks while reading and only cites what it uses. Post-hoc filtering of the Sources panel by `[n]` citations achieves clean presentation at zero extra cost.

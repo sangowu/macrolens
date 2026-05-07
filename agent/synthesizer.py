@@ -8,7 +8,7 @@ Synthesizer: 基于检索到的 context 生成最终回答。
 from __future__ import annotations
 
 import logging
-import re
+import re  # 用于 _validate_citations 的引用检查
 
 from agent.tools.code_executor import execute_python
 from models.llm.base import LLMClient
@@ -58,6 +58,7 @@ _COMPUTE_TOOL = {
 
 
 # ── 内部函数 ──────────────────────────────────────────────
+
 
 def _compute_executor(tool_name: str, tool_input: dict) -> str:
     """agentic loop 的 tool executor：执行 compute 工具。"""
