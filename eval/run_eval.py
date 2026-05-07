@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import sys
 import time
 from datetime import datetime
+
+logging.basicConfig(level=logging.INFO, format="%(name)s %(message)s", stream=sys.stdout)
 from pathlib import Path
 
 from dotenv import load_dotenv

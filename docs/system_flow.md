@@ -15,17 +15,19 @@
                     Memory 检索
                           │
                     PER Loop（最多 3 轮）
-                     ├─ Planner   (LLM #1)
-                     ├─ Executor  (纯 SQL)
+                     ├─ Planner   (LLM #1 · Tool Use → 结构化子查询)
+                     ├─ Executor  (纯 SQL + keyword fallback)
                      └─ Critic    (LLM #2)
                           │
-                    Synthesizer   (LLM #3)
+                    Synthesizer — Agentic Loop (LLM #3)
+                     └─ LLM 生成文字，遇到计算调用 compute tool
+                          └─ 沙箱 Python 执行，结果直接流回生成流
                           │
-                    Code Executor (沙箱 Python)
+                    引用验证 [n]
                           │
-                    孤立行清理
+                    Sources 面板过滤（脚本，按 [n] 引用）
                           │
-                    输出 / 报告写入 / Memory 提取
+                    输出 / 报告写入 / Memory 提取 (Tool Use · LLM #4)
 ```
 
 ---
@@ -34,10 +36,10 @@
 
 用户在 Gradio UI 输入问题，点击发送。
 
-**Chat 模式**（`ui/app.py → run_query()`）  
+**Chat 模式**（`ui/app.py → run_query()`）
 同步执行 PER Loop，阻塞等待，结果直接渲染到 Chatbot。
 
-**Task 模式**（`ui/app.py → submit_task()`）  
+**Task 模式**（`ui/app.py → submit_task()`）
 向 `tasks` 表插入一条记录（status=`pending`），启动后台线程（`threading.Thread`）。UI 通过 `gr.Timer` 每 3 秒调用 `poll_task()` 查询状态，完成后渲染 markdown 报告。
 
 ---
@@ -65,15 +67,21 @@ Relevant prior findings:
 - [finding] Google advertising revenue grew 7.2% YoY in 2022.
 ```
 
-这让 Planner 在第一轮就能感知已有结论，避免重复检索。
+Chat 模式依赖对话历史（短期记忆）提供上下文，Task 模式依赖 Memory 数据库（长期记忆）跨会话复用。
 
 ---
 
-## 第 3 步：Planner（LLM 调用 #1）
+## 第 3 步：Planner（LLM 调用 #1 · Tool Use）
 
 `agent/planner.py → plan()`
 
-把问题发给 LLM（temperature=0），要求输出结构化子查询 JSON：
+把问题发给 LLM，通过 **Tool Use** 强制输出结构化子查询：
+
+```python
+tool_choice={"type": "tool", "name": "create_query_plan"}
+```
+
+LLM 必须调用 `create_query_plan` 工具，填写经 JSON Schema 校验的参数，不能输出任何自由文本。返回结果直接作为 Python dict 使用，无需正则或 `json.loads`。
 
 ```json
 [
@@ -90,16 +98,12 @@ Relevant prior findings:
 ]
 ```
 
-LLM 决定：拆成几个子查询、查哪个数据源（`sec_chunks` / `events` / `macro_indicators`）、加什么过滤条件（`fiscal_year`、`series`、`date_from/to`）。
-
 **第 2 轮及之后**，prompt 附加 anti-repeat 约束：
 
 ```
 Focus on what's still missing: {missing_hint}
 Already searched (do NOT repeat): ["Google advertising revenue 2019...", ...]
 ```
-
-防止 Planner 重复生成相同子查询。
 
 ---
 
@@ -129,10 +133,6 @@ FROM semantic FULL OUTER JOIN lexical USING (id)
 ORDER BY rrf_score DESC LIMIT 12
 ```
 
-- **向量路**：用 embedding 模型（Qwen3-Embedding-0.6B）把子查询文字编码成 1024 维向量，pgvector HNSW 索引做余弦相似度搜索
-- **全文路**：PostgreSQL tsvector GIN 索引，`websearch_to_tsquery` 解析自然语言查询
-- **RRF 融合**：两路各取 top-20，用排名倒数和合并，取 top-12
-
 ### Macro Indicators：精确 SQL
 
 ```sql
@@ -144,9 +144,7 @@ WHERE mi.series_id = ANY($series)
 ORDER BY mi.date
 ```
 
-数值时间序列不做向量检索，直接精确匹配。
-
-所有子查询的结果合并，去重（用 id / event_id / series_id+date 作为 key），写入 `all_context`。
+所有子查询的结果合并、去重，写入 `all_context`。
 
 ---
 
@@ -161,100 +159,78 @@ ORDER BY mi.date
 返回 `(is_sufficient: bool, missing_hint: str)`。
 
 - `is_sufficient=True` → 跳出循环，进入 Synthesizer
-- `is_sufficient=False` → 把 `missing_hint` 和 `searched_queries` 一起带回第 3 步，Planner 生成新维度的子查询
+- `is_sufficient=False` → 把 `missing_hint` 和 `searched_queries` 一起带回第 3 步
 
-最多循环 3 次。简单问题通常第 1 轮就充分，复杂跨数据源问题可能跑满 3 轮。
+最多循环 3 次。
 
 ---
 
-## 第 6 步：Synthesizer（LLM 调用 #3）
+## 第 6 步：Synthesizer — Agentic Loop 写答案（LLM 调用 #3）
 
 `agent/synthesizer.py → synthesize()`
 
-把问题 + 编号后的 context 发给 LLM：
+LLM 拿到**全量 context**，进入 agentic loop 写答案：
 
 ```
-[1] SEC 10-K FY2019 | Business | 2019-12-31
-    Google advertising revenues were $134,811 million...
-
-[2] SEC 10-K FY2023 | Business | 2023-12-31
-    Google advertising revenues were $237,855 million...
-
-Question: What was Google's advertising revenue CAGR from 2019 to 2023?
+LLM 开始生成文字
+   │
+   ├─ 不需要计算 → 继续写，直到 end_turn
+   │
+   └─ 需要计算（CAGR、增长率、基点等）
+          ↓
+       调用 compute tool，传入 Python 代码
+          ↓
+       沙箱执行，结果发回 LLM
+          ↓
+       LLM 把结果内联到句子里，继续生成
+          ↓
+       直到 end_turn
 ```
 
-LLM 识别到 CAGR 需要计算，在答案里嵌入 `<compute>` 块：
+**为什么用 agentic loop 而不是 `<compute>` 标签**：
+- 无正则解析，无事后替换，无孤立行清理
+- 计算结果直接流入生成流，答案天然完整
+- 沙箱保证计算精度，LLM 不做算术
 
-```
-...With a 4-year period (2019 to 2023):
+沙箱约束：白名单 builtins，预注入 `pd`/`np`/`math`/`statistics`/`datetime`，禁止 `import`，15 秒超时。
 
-<compute>data={'s':134811,'e':237855}; result=(data['e']/data['s'])**(1/4)-1; print(f'{result*100:.1f}%')</compute>
-
-Google's advertising revenue grew at a CAGR of 15.3% from 2019 to 2023.
-```
-
-**硬规则**：
-1. 每个数字/日期/百分比必须有 `[n]` citation，找不到来源就不说
+**硬规则（System Prompt）**：
+1. 每个数字/日期/百分比必须有 `[n]` citation
 2. context 缺失时说 "The provided context does not contain [X]"
 3. 不得用背景知识补全缺失 context
+4. 派生指标必须通过 compute tool 计算
 
 ---
 
-## 第 7 步：Code Executor
+## 第 7 步：引用验证
 
-`agent/tools/code_executor.py → execute_python()`  
-`agent/synthesizer.py → _resolve_compute_blocks()`
+`agent/synthesizer.py → _validate_citations()`
 
-正则找到所有 `<compute>...</compute>` 标签，逐个执行：
+扫描答案中所有 `[n]`，验证 n 是否在 context 的范围内：
 
 ```python
-safe_globals = {
-    "__builtins__": {白名单 builtins},  # 禁止 open/os/subprocess
-    "pd": pandas, "np": numpy,
-    "math": math, "statistics": statistics,
-    "data": {},
-}
-exec(code, safe_globals)
-# 捕获 stdout，替换掉标签
+citations = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
+for n in citations:
+    if n < 1 or n > len(selected_context):
+        logger.warning("[%d] out of range", n)
 ```
 
-- 禁止 `import` 语句（`__import__` 不在白名单）
-- `pd`、`np`、`math`、`statistics`、`datetime` 预注入，直接可用
-- 15 秒超时（`threading.Timer`）
-- 执行结果（print 输出）替换掉 `<compute>` 标签
-
-执行后，文本变为：
-
-```
-...With a 4-year period (2019 to 2023):
-
-15.3%          ← 标签被替换，但 LLM 把标签放在段落之间，形成孤立行
-
-Google's advertising revenue grew at a CAGR of 15.3%...
-```
+超出范围的引用记录为 warning，不中断答案输出（可扩展为拒绝重新生成）。
 
 ---
 
-## 第 8 步：孤立行清理
+## 第 8 步：Sources 面板过滤
 
-`agent/synthesizer.py → _remove_orphaned_results()`
+`ui/app.py → _build_sources_md()`
 
-LLM 习惯把 `<compute>` 放在段落之间（先列数据，再展示计算，再写结论），导致计算结果孤立成一整段。后续句子会重复同一个数字。
+纯脚本处理，零 LLM 调用。扫描答案里所有 `[n]` 引用，只展示被实际引用的 chunk，过滤未被使用的检索结果：
 
-清理逻辑：逐行扫描，如果某行：
-1. 内容恰好等于某个 compute 结果
-2. 上一行是空行
-3. 下一行是空行
-
-则删掉这行和紧随其后的空行。
-
-最终输出：
-
+```python
+cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
+items = [(i, item) for i, item in enumerate(context, 1) if i in cited]
 ```
-...With a 4-year period (2019 to 2023):
 
-Google's advertising revenue grew at a CAGR of 15.3% from 2019 to 2023.
-```
+12 条检索结果里通常只有 2–4 条被引用，Sources 面板只展示这几条，用户可以直接溯源，不需要翻阅无关内容。
 
 ---
 
@@ -268,11 +244,11 @@ Google's advertising revenue grew at a CAGR of 15.3% from 2019 to 2023.
 
 ### Task 模式
 
-`agent/report_writer.py → write_report()`  
+`agent/report_writer.py → write_report()`
 格式化结构化 markdown 报告（Answer + Evidence 分 SEC/Events/Macro 三节），写入 `tasks.report_md`，status 改为 `completed`。
 
-`agent/memory.py → extract_and_store()`  
-额外一次 LLM 调用，从问答对里提取 2-4 条关键 finding，embed 后存入 `research_memory`：
+`agent/memory.py → extract_and_store()`
+通过 **Tool Use** 从问答对里提取 2–4 条关键 finding，embed 后存入 `research_memory`：
 
 ```json
 [
@@ -280,18 +256,35 @@ Google's advertising revenue grew at a CAGR of 15.3% from 2019 to 2023.
 ]
 ```
 
-下次有相关问题时，这条记忆会被召回注入 Planner context。
+与 Planner 一样，`tool_choice` 强制返回合法 JSON，无需正则解析。
 
 ---
 
 ## LLM 调用汇总
 
-| 阶段 | 调用次数 | 模型 | temperature |
+| 阶段 | 调用次数 | 方式 | temperature |
 |------|----------|------|-------------|
-| Planner | 最多 3 次 | Gemini / Claude | 0.0 |
-| Critic | 最多 3 次 | Gemini / Claude | 0.0 |
-| Synthesizer | 1 次 | Gemini / Claude | 0.0 |
-| Memory 提取 | 1 次（Task 模式） | Gemini / Claude | 0.0 |
-| **合计** | **3–7 次** | | |
+| Planner | 最多 3 次 | Tool Use（结构化输出） | 0.0 |
+| Critic | 最多 3 次 | chat | 0.0 |
+| Synthesizer（写答案） | 1 次（含多轮 compute tool call） | Agentic loop | 0.0 |
+| Memory 提取 | 1 次（Task 模式） | Tool Use（结构化输出） | 0.0 |
+| **合计** | **3–8 次** | | |
 
-Executor 和 Code Executor 不调 LLM，是纯 SQL + Python 计算。
+Sources 面板过滤为纯脚本处理，不调 LLM。
+
+Executor（SQL）和 Code Executor（Python 沙箱）不调 LLM。
+
+---
+
+## 与旧版的主要差异
+
+| 模块 | 旧版 | 新版 |
+|------|------|------|
+| Planner 输出解析 | 正则 + `json.loads` | Tool Use，直接取 dict |
+| Synthesizer 输入 | 全量 context | 全量 context（不变） |
+| 计算触发 | `<compute>` 标签 + 正则提取 + 事后替换 | compute tool agentic loop，结果直接内联 |
+| 孤立行清理 | `_remove_orphaned_results()` | 不再需要 |
+| Memory 提取 | 正则 + `json.loads` | Tool Use，直接取 dict |
+| 引用验证 | 无 | `_validate_citations()` 兜底检查 |
+| Sources 面板 | 展示全量检索结果 | 脚本按 `[n]` 过滤，只展示被引用的 |
+| Macro series 格式 | 只接受列表 | 自动兼容字符串和列表 |

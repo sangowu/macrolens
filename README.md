@@ -27,8 +27,8 @@
 ┌─────────────────────────────────────────────────────────┐
 │                    PER Loop                             │
 │                                                         │
-│  Planner  →  LLM decomposes question into 1-4 sub-      │
-│              queries (anti-repeat: already_searched)    │
+│  Planner  →  Tool Use → structured sub-queries (JSON)   │
+│              (anti-repeat: already_searched)            │
 │      ↓                                                  │
 │  Executor →  Pure SQL, no LLM call                      │
 │   sec_chunks  ── pgvector cosine ──┐                    │
@@ -39,14 +39,16 @@
 │      ↓                                                  │
 │  Critic   →  LLM judges sufficiency → refine up to 3×   │
 │      ↓                                                  │
-│  Synthesizer → answer with [n] citations                │
-│              → <compute> blocks for derived metrics     │
-│                 (executed by Code Executor, not LLM)    │
+│  Synthesizer → Step 1: Tool Use selects evidence IDs    │
+│              → Step 2: agentic loop writes answer       │
+│                   LLM calls compute tool for math       │
+│                   sandboxed Python executes inline      │
+│              → Step 3: citation validation [n]          │
 └────────────────────────┬────────────────────────────────┘
                          ↓
              ┌───────────────────────┐
              │   Report Writer       │ structured markdown
-             │   Memory Extractor    │ findings → pgvector
+             │   Memory Extractor    │ Tool Use → findings → pgvector
              └───────────────────────┘
 ```
 
@@ -72,17 +74,28 @@ FROM semantic FULL OUTER JOIN lexical USING (id)
 ORDER BY rrf_score DESC LIMIT 12
 ```
 
-### Code Executor
+### Synthesizer — Agentic Loop with Compute Tool
 
-Derived metrics (growth rates, CAGR, basis point changes) are computed by executed Python code, not by LLM inference. The Synthesizer embeds `<compute>` blocks inline; the executor replaces them with verified results.
+The Synthesizer uses an agentic loop so computation results flow directly into the generation stream — no regex parsing, no post-processing, no orphaned lines:
 
 ```
-Answer: "Advertising revenue grew <compute>...</compute> YoY"
-         ↓ executed
-Answer: "Advertising revenue grew 7.2% YoY"
+Agentic Answer Generation
+  LLM reads full retrieved context, writes answer citing [n] sources
+  When a derived metric is needed (CAGR, growth rate, basis points):
+    → LLM calls the compute tool with self-contained Python
+    → sandboxed Python executes (no import, 15s timeout)
+    → result flows back inline — LLM continues writing naturally
+  Loop ends at end_turn (no more tool calls needed)
+
+Citation Validation
+  All [n] references verified to exist in context
+  Out-of-range citations logged as warnings
+
+Sources Panel Filtering (script, zero LLM cost)
+  Scans [n] citations in final answer → shows only referenced chunks
 ```
 
-Sandbox: whitelisted builtins, pre-injected `pd`, `np`, `math`, `statistics`. No `import` allowed. 15s timeout.
+This replaces the prior `<compute>` regex approach — no tag parsing, no substitution pass, no risk of malformed extraction.
 
 ### Async Task Agent
 
@@ -274,6 +287,15 @@ Financial RAG requires time filtering + exact numerical queries + vector search 
 **Why PER Loop over ReAct?**
 Financial Q&A is a closed domain. PER Loop's fixed structure (3 LLM calls minimum) is more predictable and cheaper than ReAct's open-ended tool use.
 
+**Why Tool Use for structured output instead of regex?**
+Planner and Memory Extractor previously parsed LLM output with `re` + `json.loads`, which fails silently when the LLM adds surrounding text or produces malformed JSON. Tool Use with `tool_choice` forces the LLM to fill a validated schema — format errors are impossible.
+
+**Why send full context to Synthesizer instead of pre-filtering?**
+Financial report chunks are highly uniform — all contain dense numbers and financial terminology. A separate filtering step forces the LLM to judge relevance before seeing the answer, which is harder than finding the answer directly. The Synthesizer's LLM naturally ignores irrelevant chunks while reading and only cites what it uses. Post-hoc filtering of the Sources panel by `[n]` citations achieves clean presentation at zero extra cost.
+
+**Why compute via Tool Use instead of `<compute>` tags?**
+Inline tag embedding requires regex extraction and a second parse pass, and produces orphaned result lines when the LLM places the tag between paragraphs. Tool Use integrates computation into the generation stream: the LLM calls the tool mid-sentence, receives the result, and continues writing — no post-processing needed.
+
 **Why Code Executor instead of LLM arithmetic?**
 LLM arithmetic on multi-year financial data is a hallucination risk. The Code Executor moves computation into deterministic Python — every derived number in the answer is verifiable by the code shown.
 
@@ -297,7 +319,7 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 - Planner repeating identical sub-queries → added `already_searched` list to prompt
 - Chunk ablation scoring 0 due to year mismatch → reversed sort to select most recent filings
 - Critic dead loop → anti-repeat fixed Set B +0.029
-- `<compute>` output appearing as isolated line → prompt fix to require inline embedding
+- `<compute>` output appearing as isolated line → replaced `<compute>` tag + regex with compute Tool Use agentic loop; orphaned-line cleanup no longer needed
 
 ---
 

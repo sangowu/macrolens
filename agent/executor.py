@@ -100,6 +100,34 @@ ORDER BY rrf_score DESC
 LIMIT %(top_k)s
 """
 
+# ── Macro series 关键词推断 ───────────────────────────────
+
+_SERIES_KEYWORDS: list[tuple[list[str], str]] = [
+    (["fedfunds", "federal funds", "fed funds", "fed rate", "interest rate", "funds rate"], "FEDFUNDS"),
+    (["unrate", "unemployment"], "UNRATE"),
+    (["cpiaucsl", "cpi", "inflation", "consumer price"], "CPIAUCSL"),
+    (["gdpc1", "real gdp"], "GDPC1"),
+    (["gdp", "gross domestic"], "GDP"),
+    (["payems", "nonfarm", "payroll", "employment"], "PAYEMS"),
+    (["t10y2y", "yield curve", "10 year", "2 year spread"], "T10Y2Y"),
+    (["houst", "housing start"], "HOUST"),
+    (["indpro", "industrial production"], "INDPRO"),
+    (["rsafs", "retail sales", "retail spending"], "RSAFS"),
+    (["umcsent", "consumer sentiment", "michigan"], "UMCSENT"),
+    (["dcoilwtico", "oil price", "crude oil", "wti"], "DCOILWTICO"),
+]
+
+
+def _infer_series(query: str) -> list[str]:
+    """Planner 未填写 series 时，从 query 文本推断 macro series ID。"""
+    q = query.lower()
+    found = []
+    for keywords, series_id in _SERIES_KEYWORDS:
+        if any(kw in q for kw in keywords):
+            found.append(series_id)
+    return found
+
+
 # ── Macro indicators 精确查询 ──────────────────────────────
 
 MACRO_SQL = """
@@ -181,6 +209,13 @@ def _search_macro(
     filters: dict,
 ) -> list[dict]:
     series = filters.get("series", [])
+    if isinstance(series, str):
+        series = [series]
+
+    # Planner 未填写 series 时，从 query 文本推断
+    if not series:
+        series = _infer_series(filters.get("_query", ""))
+
     date_from = filters.get("date_from", "2019-01-01")
     date_to = filters.get("date_to", "2026-12-31")
 
@@ -214,7 +249,7 @@ def execute(
     for sq in sub_queries:
         query = sq["query"]
         sources = sq.get("sources", ["sec_chunks"])
-        filters = sq.get("filters", {})
+        filters = {**sq.get("filters", {}), "_query": query}
 
         for source in sources:
             if source == "sec_chunks":

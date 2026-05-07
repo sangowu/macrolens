@@ -151,7 +151,7 @@ def run_query(
         {"role": "assistant", "content": answer},
     ]
 
-    sources_md = _build_sources_md(all_context)
+    sources_md = _build_sources_md(all_context, answer)
     stats_md = _build_stats_md(
         iterations=iterations_done,
         n_context=len(all_context),
@@ -163,12 +163,19 @@ def run_query(
     return history, sources_md, stats_md, ""
 
 
-def _build_sources_md(context: list[dict]) -> str:
+def _build_sources_md(context: list[dict], answer: str = "") -> str:
     if not context:
         return "_无检索结果_"
 
+    # 只展示答案中实际引用的 chunk，过滤未被引用的噪音
+    cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)} if answer else set()
+    items = [(i, item) for i, item in enumerate(context, 1) if not cited or i in cited]
+
+    if not items:
+        return "_无检索结果_"
+
     parts = []
-    for i, item in enumerate(context, 1):
+    for i, item in items:
         src = item["source"]
         if src == "sec_chunks":
             header = f"**[{i}] SEC {item.get('doc_type', '')} FY{item.get('fiscal_year', '')} — {item.get('section', '')}**"
@@ -335,7 +342,7 @@ with gr.Blocks(title="MacroLens") as demo:
         with gr.Tab("Chat"):
             with gr.Row():
                 with gr.Column(scale=3):
-                    chatbot = gr.Chatbot(label="对话", height=520, type="messages")
+                    chatbot = gr.Chatbot(label="对话", height=520)
                     with gr.Row():
                         question_box = gr.Textbox(
                             placeholder="例：2022年加息如何影响Google广告收入？",
