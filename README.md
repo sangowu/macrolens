@@ -139,13 +139,29 @@ After each task, an LLM call extracts 2-4 key findings and stores them as vector
 
 ### RAGAS End-to-End Evaluation
 
-| Model | Set A (factual) | Set B (temporal) | Set C (analytical) |
-|-------|----------------|-----------------|-------------------|
-| BGE-M3 (remote) | 0.669 | 0.420 | 0.667 |
-| Qwen3-Embedding-0.6B (online) | 0.654 | 0.395 | 0.602 |
+Evaluated with 18 questions across three sets. Judge model: Gemini 2.5 Pro (separate from pipeline LLM).
 
-Faithfulness improved +0.024–0.031 after hardening Synthesizer prompt to mandatory citation rules.  
-Set B improved +0.029 after adding `already_searched` anti-repeat to Planner.
+| Version | faithfulness | answer_relevancy | context_precision | context_recall | ragas_score |
+|---------|-------------|-----------------|------------------|---------------|-------------|
+| v1 (baseline) | 0.618 | 1.000 | 0.174 | 0.471 | 0.566 |
+| **v10 (current)** | **0.594** | **0.917** | **0.579** | **0.648** | **0.685** |
+| Δ | -0.023 | -0.083 | **+0.405** | **+0.178** | **+0.119** |
+
+Key improvements from v1 → v10:
+- `context_precision` +0.405: upgraded from holistic estimate to **Precision@K** (per-chunk relevance, rank-weighted)
+- `context_recall` +0.178: upgraded from holistic score to **atomic fact decomposition** (ground truth split into individual claims, each verified against context)
+- `faithfulness` / `answer_relevancy` slight decrease reflects stricter judging by Gemini 2.5 Pro, not answer quality degradation
+- Eval pipeline fixed: `run_eval.py` now calls `per_loop.run()` directly, so the `already_searched` anti-repeat is active during evaluation (was bypassed in v1)
+
+### Eval Infrastructure
+
+| Component | v1 | v10 |
+|-----------|----|----|
+| Judge model | gemini-3.1-flash-lite-preview (shared with pipeline) | gemini-2.5-pro (dedicated, configurable via `judge:` in config.yaml) |
+| context_precision | holistic fraction estimate | Precision@K — per-chunk boolean + rank-weighted average |
+| context_recall | holistic score | atomic fact decomposition — each ground-truth claim checked independently |
+| context window for judge | 3 000 chars / 15 chunks | 10 000 chars / 25 chunks |
+| Pipeline used during eval | reimplemented inline (missing `already_searched`) | `per_loop.run()` directly |
 
 ---
 
@@ -162,7 +178,7 @@ Set B improved +0.029 after adding `already_searched` anti-repeat to Planner.
 | Task Queue | PostgreSQL + asyncio worker (SELECT FOR UPDATE SKIP LOCKED) |
 | API | FastAPI |
 | UI | Gradio |
-| Evaluation | RAGAS + custom ablation framework |
+| Evaluation | Custom LLM-as-Judge (Precision@K + atomic recall) + chunk ablation |
 
 ---
 
@@ -312,7 +328,7 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 
 ## Failure Analysis
 
-12 documented bugs and optimizations in [`docs/failure_analysis.md`](docs/failure_analysis.md), including:
+15 documented bugs and optimizations in [`docs/failure_analysis.md`](docs/failure_analysis.md), including:
 
 - `sec-parser` returning 3.8M empty nodes → replaced with BeautifulSoup + regex
 - Synthesizer hallucination (faithfulness=0) → hardened to mandatory `[n]` citation rules
@@ -320,6 +336,12 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 - Chunk ablation scoring 0 due to year mismatch → reversed sort to select most recent filings
 - Critic dead loop → anti-repeat fixed Set B +0.029
 - `<compute>` output appearing as isolated line → replaced `<compute>` tag + regex with compute Tool Use agentic loop; orphaned-line cleanup no longer needed
+- Eval pipeline reimplementation bypassing `already_searched` → replaced with direct `per_loop.run()` call
+- Eval context truncation (3 000 chars) hiding evidence from judge → expanded to 10 000 chars / 25 chunks
+- `context_precision` holistic estimate not reflecting ranking quality → replaced with Precision@K
+- `context_recall` holistic score masking partial coverage → replaced with atomic fact decomposition
+- Gemini 2.5 Pro `resp.text` returning `None` → guarded with `(resp.text or "").strip()`
+- Eval duplicate rows when ragas_score is None → fixed `:.3f` format crash that triggered the except branch
 
 ---
 

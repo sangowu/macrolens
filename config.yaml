@@ -59,3 +59,8 @@ llm:
   top_k: 12                   # 每个子查询返回的最终 chunk 数
   candidate_k: 20             # 向量/全文各自召回的候选数（RRF 前）
   api_key_env: GEMINI_API_KEY  # 切换 gemini 时改为 GEMINI_API_KEY
+
+judge:
+  provider: gemini
+  model: gemini-2.5-pro
+  api_key_env: GEMINI_API_KEY

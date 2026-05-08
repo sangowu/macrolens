@@ -78,6 +78,25 @@ def create_llm_client(cfg: AppConfig) -> LLMClient:
     raise ValueError(f"Unknown LLM provider: {cfg.llm.provider!r}")
 
 
+def create_judge_llm_client(cfg: AppConfig) -> LLMClient:
+    """创建评估 Judge 专用 LLM，未配置 judge 块时 fallback 到 llm。"""
+    judge = cfg.judge
+    if judge is None:
+        return create_llm_client(cfg)
+
+    api_key = os.environ[judge.api_key_env]
+
+    if judge.provider == "anthropic":
+        from models.llm.anthropic_client import AnthropicClient
+        return AnthropicClient(model=judge.model, api_key=api_key)
+
+    if judge.provider == "gemini":
+        from models.llm.gemini_client import GeminiClient
+        return GeminiClient(model=judge.model, api_key=api_key)
+
+    raise ValueError(f"Unknown judge provider: {judge.provider!r}")
+
+
 @contextmanager
 def managed_models(
     cfg: AppConfig,

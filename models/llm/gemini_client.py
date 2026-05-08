@@ -30,7 +30,7 @@ class GeminiClient:
                 temperature=temperature,
             ),
         )
-        return resp.text.strip()
+        return (resp.text or "").strip()
 
     def chat_with_tools(
         self,

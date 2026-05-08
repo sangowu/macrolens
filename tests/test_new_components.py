@@ -214,3 +214,78 @@ class TestFormatContext:
                 "series_id": "FEDFUNDS", "date": "2022-12-01", "value": 4.1, "units": "%"}]
         text = _format_context(ctx)
         assert "[1]" in text and "FEDFUNDS" in text and "4.1" in text
+
+
+# ── Eval Metrics ─────────────────────────────────────────
+
+class TestContextPrecision:
+    """验证 Precision@K 计算逻辑，不调真实 LLM。"""
+
+    def _run(self, relevance: list[bool], reason: str = "test") -> dict:
+        import json
+        from eval.metrics import context_precision
+
+        llm = MockLLM(chat_response=json.dumps({"relevance": relevance, "reason": reason}))
+        ctx = [{"source": "sec_chunks", "id": f"c{i}", "content": f"text {i}",
+                "doc_type": "10-K", "fiscal_year": 2022} for i in range(len(relevance))]
+        return context_precision("test question", ctx, llm)
+
+    def test_all_relevant(self):
+        r = self._run([True, True, True])
+        assert r["score"] == pytest.approx(1.0)
+        assert r["useful_count"] == 3
+
+    def test_all_irrelevant(self):
+        r = self._run([False, False, False])
+        assert r["score"] == pytest.approx(0.0)
+        assert r["useful_count"] == 0
+
+    def test_empty_relevance(self):
+        # LLM 返回空数组时降级为 0
+        r = self._run([])
+        assert r["score"] == pytest.approx(0.0)
+
+    def test_relevant_first(self):
+        # [T, F, F]: P@1=1.0 / 1 relevant = 1.0
+        r = self._run([True, False, False])
+        assert r["score"] == pytest.approx(1.0)
+
+    def test_relevant_last(self):
+        # [F, F, T]: P@3=1/3 / 1 relevant = 0.333
+        r = self._run([False, False, True])
+        assert r["score"] == pytest.approx(1 / 3)
+
+    def test_mixed_order_matters(self):
+        # [T, F, T]: P@1=1.0, P@3=2/3 → (1.0 + 0.667) / 2 = 0.833
+        r = self._run([True, False, True])
+        assert r["score"] == pytest.approx((1.0 + 2 / 3) / 2)
+
+
+class TestContextRecall:
+    """验证原子声明回退计算逻辑，不调真实 LLM。"""
+
+    def _run(self, response: dict) -> dict:
+        import json
+        from eval.metrics import context_recall
+
+        llm = MockLLM(chat_response=json.dumps(response))
+        ctx = [{"source": "sec_chunks", "id": "c1", "content": "some text",
+                "doc_type": "10-K", "fiscal_year": 2022}]
+        return context_recall("test question", "ground truth", ctx, llm)
+
+    def test_score_from_llm_used_directly(self):
+        r = self._run({"atomic_facts": ["f1", "f2"], "supported": [True, True], "score": 1.0, "reason": "ok"})
+        assert r["score"] == pytest.approx(1.0)
+
+    def test_fallback_when_score_missing(self):
+        # LLM 没有输出 score，应由 supported 自行计算
+        r = self._run({"atomic_facts": ["f1", "f2", "f3"], "supported": [True, False, True], "reason": "partial"})
+        assert r["score"] == pytest.approx(2 / 3)
+
+    def test_fallback_empty_facts(self):
+        r = self._run({"atomic_facts": [], "supported": [], "reason": "n/a"})
+        assert r["score"] == pytest.approx(0.0)
+
+    def test_partial_support(self):
+        r = self._run({"atomic_facts": ["f1", "f2"], "supported": [True, False], "score": 0.5, "reason": "half"})
+        assert r["score"] == pytest.approx(0.5)

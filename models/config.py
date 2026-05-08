@@ -92,6 +92,12 @@ class LLMConfig(BaseModel):
     api_key_env: str = "ANTHROPIC_API_KEY"  # 指向 .env 中的变量名
 
 
+class JudgeLLMConfig(BaseModel):
+    provider: Literal["anthropic", "gemini"] = "gemini"
+    model: str = "gemini-2.5-pro"
+    api_key_env: str = "GEMINI_API_KEY"
+
+
 class AppConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
@@ -99,6 +105,7 @@ class AppConfig(BaseModel):
     vector_dim: int = 1024
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    judge: JudgeLLMConfig | None = None  # 未配置时 fallback 到 llm
 
 
 def load_config(path: str = "config.yaml") -> AppConfig:

@@ -47,24 +47,24 @@ Rate answer relevancy from 0.0 to 1.0:
 Respond with JSON only: {{"score": <float>, "reason": "<one sentence>"}}"""
 
 _CONTEXT_PRECISION_PROMPT = """\
-Given a question and a list of retrieved context chunks, evaluate what fraction of the chunks
-are actually relevant and useful for answering the question.
+Given a question and a list of retrieved context chunks (in retrieval order), judge whether
+each chunk is relevant and useful for answering the question.
 
 Question: {question}
 
-Retrieved context chunks:
+Retrieved context chunks (in order):
 {context_list}
 
-Rate context precision from 0.0 to 1.0:
-- 1.0: All retrieved chunks are relevant
-- 0.5: About half the chunks are relevant
-- 0.0: No chunks are relevant
+For each chunk output true (relevant) or false (not relevant), in the same order.
 
-Respond with JSON only: {{"score": <float>, "useful_count": <int>, "total_count": <int>, "reason": "<one sentence>"}}"""
+Respond with JSON only:
+{{
+  "relevance": [true, false, ...],
+  "reason": "<one sentence>"
+}}"""
 
 _CONTEXT_RECALL_PROMPT = """\
-Given a question, the ground truth answer, and retrieved context chunks,
-evaluate whether the context contains the key information needed to answer the question.
+You are evaluating whether retrieved context contains the information needed to answer a question.
 
 Question: {question}
 Ground truth: {ground_truth}
@@ -72,27 +72,36 @@ Ground truth: {ground_truth}
 Retrieved context:
 {context}
 
-Rate context recall from 0.0 to 1.0:
-- 1.0: Context contains all key facts needed to answer
-- 0.5: Context contains some but not all key facts
-- 0.0: Context is missing the key facts needed
+Instructions:
+1. List every distinct atomic fact in the ground truth (one per line, keep them short).
+2. For each fact, write true if the context explicitly supports it, false if not.
+3. Compute score = (number of true) / (total facts).
 
-Respond with JSON only: {{"score": <float>, "reason": "<one sentence>"}}"""
+Important: series codes in context map to their full names (e.g. UNRATE = US Unemployment Rate, FEDFUNDS = Federal Funds Rate, CPIAUCSL = CPI Inflation).
+
+Respond with JSON only:
+{{
+  "atomic_facts": ["<fact1>", "<fact2>", ...],
+  "supported": [true, false, ...],
+  "score": <float 0.0-1.0>,
+  "reason": "<one sentence>"
+}}"""
 
 
 # ── 工具函数 ───────────────────────────────────────────────
 
-def _format_context_flat(context: list[dict], max_chars: int = 3000) -> str:
+def _format_context_flat(context: list[dict], max_chars: int = 10000) -> str:
     parts = []
     total = 0
     for i, item in enumerate(context, 1):
         src = item["source"]
         if src == "sec_chunks":
-            text = f"[{i}][SEC {item.get('doc_type','')} FY{item.get('fiscal_year','')}] {item['content'][:300]}"
+            text = f"[{i}][SEC {item.get('doc_type','')} FY{item.get('fiscal_year','')}] {item['content'][:600]}"
         elif src == "events":
-            text = f"[{i}][Event {item.get('date','')}] {item.get('title','')}: {item.get('description','')[:200]}"
+            text = f"[{i}][Event {item.get('date','')}] {item.get('title','')}: {item.get('description','')[:400]}"
         else:
-            text = f"[{i}][Macro {item.get('series_id','')} {item.get('date','')}] {item.get('value','')}"
+            title = item.get('title') or item.get('series_id', '')
+            text = f"[{i}][Macro {title} ({item.get('series_id','')}) {item.get('date','')}] {item.get('value','')} {item.get('units','')}"
         parts.append(text)
         total += len(text)
         if total > max_chars:
@@ -100,16 +109,17 @@ def _format_context_flat(context: list[dict], max_chars: int = 3000) -> str:
     return "\n\n".join(parts)
 
 
-def _format_context_list(context: list[dict], max_items: int = 15) -> str:
+def _format_context_list(context: list[dict], max_items: int = 25) -> str:
     lines = []
     for i, item in enumerate(context[:max_items], 1):
         src = item["source"]
         if src == "sec_chunks":
-            lines.append(f"[{i}] SEC {item.get('doc_type','')} FY{item.get('fiscal_year','')} | {item['content'][:150]}")
+            lines.append(f"[{i}] SEC {item.get('doc_type','')} FY{item.get('fiscal_year','')} | {item['content'][:300]}")
         elif src == "events":
             lines.append(f"[{i}] Event | {item.get('title','')[:100]}")
         else:
-            lines.append(f"[{i}] Macro {item.get('series_id','')} {item.get('date','')} = {item.get('value','')}")
+            title = item.get('title') or item.get('series_id', '')
+            lines.append(f"[{i}] Macro {title} ({item.get('series_id','')}) {item.get('date','')} = {item.get('value','')} {item.get('units','')}")
     return "\n".join(lines)
 
 
@@ -117,9 +127,11 @@ def _call_judge(llm: LLMClient, prompt: str) -> dict:
     raw = llm.chat(
         system="You are a precise evaluation judge. Always respond with valid JSON only.",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=256,
+        max_tokens=4096,
         temperature=0.0,
     )
+    if not raw:
+        raise ValueError("Judge returned empty response")
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if match:
         raw = match.group(0)
@@ -147,7 +159,26 @@ def context_precision(question: str, context: list[dict], llm: LLMClient) -> dic
         question=question,
         context_list=_format_context_list(context),
     )
-    return _call_judge(llm, prompt)
+    r = _call_judge(llm, prompt)
+    relevance: list[bool] = r.get("relevance", [])
+    if not relevance:
+        return {"score": 0.0, "useful_count": 0, "total_count": 0, "reason": r.get("reason", "")}
+
+    # Precision@K: Σ(P@k × rel_k) / Σ(rel_k)
+    numerator = 0.0
+    denominator = 0.0
+    for k, rel in enumerate(relevance, 1):
+        if rel:
+            precision_at_k = sum(1 for v in relevance[:k] if v) / k
+            numerator += precision_at_k
+            denominator += 1
+    score = numerator / denominator if denominator > 0 else 0.0
+    return {
+        "score": score,
+        "useful_count": int(denominator),
+        "total_count": len(relevance),
+        "reason": r.get("reason", ""),
+    }
 
 
 def context_recall(question: str, ground_truth: str, context: list[dict], llm: LLMClient) -> dict:
@@ -156,7 +187,14 @@ def context_recall(question: str, ground_truth: str, context: list[dict], llm: L
         ground_truth=ground_truth,
         context=_format_context_flat(context),
     )
-    return _call_judge(llm, prompt)
+    r = _call_judge(llm, prompt)
+    # LLM 直接在 JSON 里算好 score；若 LLM 漏算则用 supported/atomic_facts 自行计算
+    if "score" not in r:
+        facts = r.get("atomic_facts", [])
+        supported = r.get("supported", [])
+        total = len(facts)
+        r["score"] = sum(1 for v in supported if v) / total if total > 0 else 0.0
+    return r
 
 
 def evaluate_all(

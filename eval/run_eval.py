@@ -30,7 +30,7 @@ from agent.per_loop import run as per_loop_run
 from eval.metrics import evaluate_all
 from eval.questions import ALL_QUESTIONS, get_set
 from models.config import load_config
-from models.factory import create_embedding, create_llm_client
+from models.factory import create_embedding, create_judge_llm_client, create_llm_client
 
 
 def main() -> None:
@@ -44,6 +44,9 @@ def main() -> None:
     cfg = load_config(args.config)
     embedder = create_embedding(cfg)
     llm = create_llm_client(cfg)
+    judge_llm = create_judge_llm_client(cfg)
+    print(f"Pipeline LLM : {cfg.llm.model}")
+    print(f"Judge LLM    : {cfg.judge.model if cfg.judge else cfg.llm.model}")
 
     questions = []
     for s in args.sets:
@@ -70,44 +73,13 @@ def main() -> None:
                 print(f"\n[{q.qid}] {q.question[:70]}...")
                 t0 = time.time()
 
-                all_context: list[dict] = []
-
-                def _run_with_context_capture(question, cfg, conn, embedder, llm, max_iter):
-                    """Wrapper to capture context from per_loop."""
-                    from agent.critic import critique
-                    from agent.executor import execute
-                    from agent.planner import plan
-                    from agent.synthesizer import synthesize
-
-                    context: list[dict] = []
-                    history: list[dict] = []
-                    missing_hint = ""
-
-                    for iteration in range(1, max_iter + 1):
-                        prompt = question if iteration == 1 else f"{question}\n\nFocus on: {missing_hint}"
-                        sub_queries = plan(prompt, llm, history=history if iteration > 1 else None)
-                        new_items = execute(sub_queries, conn, embedder, cfg.llm)
-                        seen = {(c.get("id") or c.get("event_id") or c.get("date","") + c.get("series_id","")) for c in context}
-                        for c in new_items:
-                            key = c.get("id") or c.get("event_id") or c.get("date","") + c.get("series_id","")
-                            if key not in seen:
-                                context.append(c)
-                                seen.add(key)
-                        is_sufficient, missing_hint = critique(question, context, llm)
-                        if is_sufficient or iteration == max_iter:
-                            break
-                        history.append({"role": "assistant", "content": missing_hint})
-
-                    answer = synthesize(question, context, llm, max_tokens=cfg.llm.max_tokens)
-                    return answer, context
-
                 try:
-                    answer, context = _run_with_context_capture(
-                        q.question, cfg, conn, embedder, llm, args.max_iter
+                    answer, context = per_loop_run(
+                        q.question, cfg, conn, embedder, llm, max_iter=args.max_iter
                     )
                     latency = round(time.time() - t0, 1)
 
-                    metrics = evaluate_all(q.question, q.ground_truth, answer, context, llm)
+                    metrics = evaluate_all(q.question, q.ground_truth, answer, context, judge_llm)
 
                     row = {
                         "qid": q.qid,
@@ -121,8 +93,9 @@ def main() -> None:
                     writer.writerow(row)
                     f.flush()
 
-                    score = metrics.get("ragas_score")
-                    print(f"  RAGAS: {score:.3f} | faithfulness={metrics.get('faithfulness'):.2f} | relevancy={metrics.get('answer_relevancy'):.2f} | precision={metrics.get('context_precision'):.2f} | recall={metrics.get('context_recall'):.2f} | {latency}s")
+                    def _fmt(v) -> str:
+                        return f"{v:.3f}" if v is not None else "None"
+                    print(f"  RAGAS: {_fmt(metrics.get('ragas_score'))} | faithfulness={_fmt(metrics.get('faithfulness'))} | relevancy={_fmt(metrics.get('answer_relevancy'))} | precision={_fmt(metrics.get('context_precision'))} | recall={_fmt(metrics.get('context_recall'))} | {latency}s")
 
                 except Exception as e:
                     print(f"  ERROR: {e}")
