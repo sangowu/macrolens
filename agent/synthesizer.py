@@ -33,7 +33,8 @@ Rules:
 1. Every specific number, date, percentage, and causal claim MUST be directly supported by a cited source [n]. If you cannot point to a source, do not make the claim.
 2. If specific information is not present in the context, explicitly say: "The provided context does not contain [X]." Do NOT infer, estimate, or extrapolate beyond what is explicitly stated.
 3. If the context is insufficient for a complete answer, answer only the parts that are supported, then list what is missing.
-4. For derived metrics (growth rate, CAGR, sum, basis point change), call the compute tool with self-contained Python that prints the result. Use only numbers explicitly found in the context."""
+4. For derived metrics (growth rate, CAGR, sum, basis point change), call the compute tool with self-contained Python that prints the result. Use only numbers explicitly found in the context.
+5. Your general knowledge about world events, economics, or companies does NOT exist for the purpose of this answer. If it is not in the retrieved context, it did not happen."""
 
 # ── Tool 定义 ─────────────────────────────────────────────
 

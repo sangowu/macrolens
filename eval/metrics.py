@@ -40,9 +40,9 @@ Question: {question}
 Answer: {answer}
 
 Rate answer relevancy from 0.0 to 1.0:
-- 1.0: Answer directly and completely addresses the question
+- 1.0: Answer directly and completely addresses the question. Also 1.0 if the question is speculative, out-of-scope, or unanswerable and the answer correctly says so.
 - 0.5: Answer is partially relevant or incomplete
-- 0.0: Answer does not address the question
+- 0.0: Answer does not address the question at all
 
 Respond with JSON only: {{"score": <float>, "reason": "<one sentence>"}}"""
 
@@ -76,8 +76,6 @@ Instructions:
 1. List every distinct atomic fact in the ground truth (one per line, keep them short).
 2. For each fact, write true if the context explicitly supports it, false if not.
 3. Compute score = (number of true) / (total facts).
-
-Important: series codes in context map to their full names (e.g. UNRATE = US Unemployment Rate, FEDFUNDS = Federal Funds Rate, CPIAUCSL = CPI Inflation).
 
 Respond with JSON only:
 {{
