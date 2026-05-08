@@ -200,6 +200,7 @@ LLM 开始生成文字
 2. context 缺失时说 "The provided context does not contain [X]"
 3. 不得用背景知识补全缺失 context
 4. 派生指标必须通过 compute tool 计算
+5. 通用知识对本次回答不存在——context 里没有的信息就不存在（切断 LLM 引用训练数据的动机）
 
 ---
 

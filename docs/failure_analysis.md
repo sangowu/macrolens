@@ -262,6 +262,7 @@ section filter 对综合分析类问题（Set C）有帮助，完全移除反而
 
 ## Bug #12：Gradio 6.x API Breaking Changes
 
+
 **现象**  
 升级到 Gradio 6.14 后启动 UI 报错：
 - `theme` 参数从 `gr.Blocks()` 移到 `launch()`
@@ -274,5 +275,112 @@ section filter 对综合分析类问题（Set C）有帮助，完全移除反而
 - history 格式改为 messages dict 格式
 
 **教训**：Gradio 版本跨越大版本（5→6）时需查阅 migration guide，不要假设 API 向后兼容。
+
+---
+
+## Bug #13：Eval 重写了 PER Loop 但漏掉 `already_searched`
+
+**现象**  
+`run_eval.py` 里存在一个 `_run_with_context_capture` 内部函数，独立实现了 Plan→Execute→Critique 循环。Set B 多跳题的 context_recall 偏低，难以判断是 pipeline 问题还是 eval 问题。
+
+**根因**  
+`_run_with_context_capture` 的第 2 轮 prompt 只拼了 `missing_hint`，没有附加 `already_searched` 列表。`per_loop.py` 里的防重机制在 eval 过程中完全没有生效。Planner 在第 2 轮重复了第 1 轮的子查询，new context=0，等价于只跑了 1 轮。
+
+**修复**  
+删除 32 行冗余函数，直接调用 `per_loop.run()`：
+```python
+answer, context = per_loop_run(q.question, cfg, conn, embedder, llm, max_iter=args.max_iter)
+```
+
+**教训**：eval 脚本里"重实现"pipeline 是危险的，任何 pipeline 的改动都需要同步更新 eval，极易遗漏。直接调用被测函数才能保证评估的是真实行为。
+
+---
+
+## Bug #14：Judge 只能看到全量 context 的 5%
+
+**现象**  
+faithfulness 和 context_recall Judge 给出不稳定的低分，即使答案明显正确。
+
+**根因**  
+`_format_context_flat` 的硬上限是 `max_chars=3000`，每条 SEC chunk 截断到 300 字符。一次评估有 20–25 条 context，3000 字符只覆盖了全量内容的不到 5%。Judge 因为看不完整内容，对"context 是否支撑答案"的判断严重失真。
+
+**修复**  
+- `max_chars` 3000 → 10000，每条 SEC chunk 截断 300 → 600 字符
+- `_format_context_list` 的 `max_items` 15 → 25，每条 150 → 300 字符
+
+**教训**：LLM-as-Judge 的上下文窗口限制是隐性的评估偏差来源。Judge 看不到的内容等于不存在，必须确保 Judge 有足够的信息做判断。
+
+---
+
+## Bug #15：Gemini 2.5 Pro `resp.text` 返回 None 导致评估 CSV 出现重复行
+
+**现象**  
+评估 CSV 里每道题出现两行，大多数指标为空；`ragas_score` 有时显示为 `1.0`（实际只有 `answer_relevancy` 成功）。
+
+**根因（三层叠加）**  
+1. Gemini 2.5 Pro 是思考模型（thinking model），某些 prompt 下 `resp.text` 返回 `None`
+2. `GeminiClient.chat()` 直接 `resp.text.strip()` → `AttributeError: 'NoneType'`
+3. `evaluate_all` 内部捕获了这个异常，把指标设为 `None`，但 `ragas_score` 也变成 `None`
+4. `run_eval.py` 中 `print(f"RAGAS: {score:.3f}")` 对 `None` 格式化 → `TypeError`
+5. 外层 `try/except` 捕获 `TypeError`，写入第二条空行
+
+**修复**  
+```python
+# gemini_client.py
+return (resp.text or "").strip()   # 防御 None
+
+# metrics.py
+if not raw:
+    raise ValueError("Judge returned empty response")  # 早退，明确报错
+
+# run_eval.py
+def _fmt(v): return f"{v:.3f}" if v is not None else "None"  # 安全格式化
+```
+
+**教训**：思考模型的响应格式与普通模型不同，接入新模型时必须验证 `resp.text` 的边界行为。连锁异常（A 崩溃 → B 捕获 → C 写错数据）需要在每一层都加防御。
+
+---
+
+## Bug #16：`answer_relevancy` Judge 将正确的"无法回答"判为 0.0
+
+**现象**  
+C03（"如果 Fed 降息到零，Google 股价会怎样"）在评估中 `answer_relevancy=0.0`。系统给出了"无法从历史财报回答投机性问题"的正确拒答，但 Judge 认为"答案没有回答问题"。
+
+**根因**  
+`_RELEVANCY_PROMPT` 对 `1.0` 的定义只有"直接完整地回答问题"，没有覆盖"问题本身不可回答"的场景。Judge 把正确的拒答当成了不相关。
+
+**修复**  
+在 prompt 的 1.0 描述中补充：
+```
+- 1.0: ... Also 1.0 if the question is speculative, out-of-scope, or unanswerable
+       and the answer correctly says so.
+```
+
+**效果**：C03 answer_relevancy 0.0 → 1.0
+
+**教训**：评估边界案例（Set C 的对抗/超范围题）与主流题目有不同的"正确答案"定义，Judge prompt 必须显式覆盖这些场景，否则指标会系统性低估系统的正确行为。
+
+---
+
+## Bug #17：Synthesizer 用背景知识填补缺失 context（faithfulness 低）
+
+**现象**  
+B02（COVID-19 对 Google 营收的影响）评估 faithfulness=0.2，Judge 指出答案包含"American Rescue Plan"、"shift to less commercial topics"等内容，但这些信息不在任何 context chunk 里。
+
+**根因**  
+SYSTEM_PROMPT 有三条硬规则，但都指向"找不到来源就不写"。LLM 生成完整叙述的内在倾向强于软性约束，在问题需要宏观背景时会无意识地引入背景知识，特别是叙事性强的历史事件（COVID 影响、经济危机）。
+
+**修复**  
+新增 Rule 5，从根本上切断 LLM 引用通用知识的动机：
+```
+5. Your general knowledge about world events, economics, or companies does NOT exist
+   for the purpose of this answer. If it is not in the retrieved context, it did not happen.
+```
+
+**效果**：B02 faithfulness 0.20 → 0.30（部分改善）。
+
+**残余问题**：B01/B02 这类因果分析题（"加息如何影响广告收入"）在 SEC 财报中找不到直接的因果陈述，只有孤立的数字。Rule 5 可以阻止 Synthesizer 补充背景叙述，但无法提供财报中本不存在的因果分析。这是数据源的结构性局限，根本解决方案是引入分析师报告。
+
+**教训**：对于叙事性强的事件（COVID、经济危机），LLM 极难严格区分"来自 context"和"来自训练数据"的信息。Synthesizer 的 faithfulness 对于此类题目存在系统性天花板。
 
 ---
