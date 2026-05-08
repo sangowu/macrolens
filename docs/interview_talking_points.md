@@ -117,7 +117,7 @@ LangChain 的抽象层会把这些调试路径全部遮住。
 2. **事件库手工维护**：30 条手工标注，规模化需要自动事件抽取（NER + 新闻爬虫）
 3. **因果分析缺失**：SEC 财报不包含"加息→广告收入下降"的直接因果链，这类分析需要分析师报告（付费数据源）
 4. **latency 较高**：8-15s/query，主要来自 3 次 LLM 调用 + 2 次 embedding API。生产环境需要 streaming + async
-5. **评测集偏小**：18 个问题（SSH 错误丢失 2 题），统计显著性不足，需要扩展到 100+ 条
+5. **评测集偏小**：18 个问题，统计显著性不足，需要扩展到 100+ 条
 
 ---
 
@@ -140,23 +140,60 @@ LangChain 的抽象层会把这些调试路径全部遮住。
 
 **决策**：LLM 做多步数值计算是幻觉的高发区。Synthesizer 之前 faithfulness=0 的案例中，有一类就是 LLM 从 context 拿到正确的数字，但在脑子里算错了增长率。
 
-**修复**：Synthesizer 生成 `<compute>` 块，由沙箱 Python 执行，print 输出内联替换标签。
+**实现**：Synthesizer 用 `chat_agentic()` 多轮循环。LLM 写答案途中遇到派生计算直接调用 `compute` tool，沙箱 Python 执行后结果内联返回，LLM 继续生成——无需标签解析，无需二次替换。
 
 ```
-"Revenue grew <compute>data={'r21':182.5,'r22':224.5}; result=(data['r22']/data['r21']-1)*100; print(f'{result:.1f}%')</compute> YoY"
-↓ executed
-"Revenue grew 7.2% YoY"
+LLM: "Revenue grew "
+→ calls compute(code="print(f'{(224.5/182.5-1)*100:.1f}%')")
+← sandbox returns: "23.0%"
+LLM: "Revenue grew 23.0% YoY [1]"
 ```
 
 **数据**：每个派生数字有两层保障——来源 citation `[n]` + 可执行代码。计算结果可独立验证，不依赖 LLM 推理。
 
 **沙箱设计**：白名单 builtins，预注入 `pd/np/math/statistics`，禁止 `import`，15s 超时。
 
-**反方**：增加了 prompt 复杂度，LLM 需要判断何时该用 `<compute>`。但金融场景的计算边界清晰（出现增长率/CAGR/基点变化时必须用），LLM 的判断相对稳定。
+**早期设计是 `<compute>` 标签**：Synthesizer 生成标签，post-process 时 regex 提取代码执行、结果替换标签。被废弃原因：LLM 有时把标签放在段落之间，执行结果变成孤立行，正则提取也容易受 LLM 输出格式影响失效。agentic loop 消除了后处理这一环节。
 
 ---
 
-## TP-11：Async Task Agent + Research Memory
+## TP-11：评估方法论：为什么不用 RAGAS 库，以及踩了哪些坑？
+
+**决策**：自定义 LLM-as-Judge，不用官方 `ragas` 库。
+
+原因是**接口不兼容**：`ragas` 要求 LangChain `BaseLLM` 接口和 `context: list[str]` 格式，本项目用自定义 `LLMClient` Protocol，context 是 `list[dict]`（含 source、fiscal_year、series_id 等字段）。适配的代价高于自己实现，而且自定义实现可以把这些结构信息直接暴露给 Judge。
+
+**实现的四个指标**：
+- `faithfulness`：答案里的每个声明是否有 context 来源支撑
+- `answer_relevancy`：答案是否切题
+- `context_precision`：Precision@K——按检索顺序对每个 chunk 判断相关性，计算排名加权精度
+- `context_recall`：原子事实分解——把 ground truth 拆成独立声明，逐一检查 context 是否覆盖
+
+**踩的坑，面试时主动说**：
+
+*坑 1：eval 里重写了 per_loop，但漏了 `already_searched`*
+`run_eval.py` 里有一个 `_run_with_context_capture` 函数独立实现了 PER Loop，但 Planner 的第二轮 prompt 缺少"已搜过的查询"列表。结果 eval 跑出来的多跳问题（Set B）分数偏低，是 pipeline 的问题还是 eval 的问题都难判断。修复：直接调 `per_loop.run()`，删掉 32 行冗余代码。
+
+*坑 2：Judge 看到的 context 只有 3000 字符*
+原始截断是 3000 chars/15 chunks，覆盖了全量 context 的不到 5%。faithfulness 和 recall Judge 因为看不到完整内容，给出了不准确的低分。修复：扩大到 10000 chars/25 chunks。
+
+*坑 3：弱模型（Flash Lite）做 Judge 导致 recall=0*
+macro 数据的 context 显示的是 `UNRATE: 3.4`，ground truth 写的是 "US unemployment rate was 3.4%"。Flash Lite 不能可靠地把 `UNRATE` 映射到"unemployment rate"，对明显正确的答案给出 recall=0。修复：context 格式补全完整 title（`Unemployment Rate (UNRATE)`）+ Judge 换成 Gemini 2.5 Pro。
+
+*坑 4：Gemini 2.5 Pro `resp.text` 返回 None*
+思考模型（thinking model）在某些 prompt 下 `resp.text` 是 None，直接 `.strip()` 报 AttributeError。下游 `ragas_score` 因为 None 导致 f-string 格式化崩溃，触发 except 分支写入第二行，CSV 里每题出现重复行。两处修复：`(resp.text or "").strip()` + print 格式化用安全函数。
+
+**最终效果**（v1 → v10）：
+
+| 指标 | v1 | v10 | Δ |
+|------|----|----|---|
+| context_precision | 0.174 | 0.579 | +0.405 |
+| context_recall | 0.471 | 0.648 | +0.178 |
+| ragas_score | 0.566 | 0.685 | +0.119 |
+
+---
+
+## TP-12：Async Task Agent + Research Memory
 
 **决策**：聊天模式是无状态的 Q&A；Task 模式引入了两个不同的能力——
 
@@ -176,4 +213,4 @@ LangChain 的抽象层会把这些调试路径全部遮住。
 
 > 面试开场或 HR 初面用
 
-"MacroLens 是一个专注于 GOOGL 财报和美国宏观经济的研究 Agent，有别于普通 RAG 聊天机器人。核心差异有三点：第一，答案里的每个数字都有两层验证——SEC 文档的引用标注，加上可执行的 Python 代码；增长率、CAGR、基点变化都是代码算出来的，不是 LLM 推理的。第二，异步任务模式——用户提交分析任务，Agent 在后台自主执行，生成结构化 markdown 报告，而不是即时聊天回复。第三，跨会话研究记忆——每次任务完成后提取关键发现存入向量数据库，下次任务自动召回相关历史，Agent 有认知连续性。整个系统纯 Python，没有 LangChain，每个组件独立可测，有 RAGAS 端到端评测数字支撑设计决策。"
+"MacroLens 是一个专注于 GOOGL 财报和美国宏观经济的研究 Agent，有别于普通 RAG 聊天机器人。核心差异有三点：第一，答案里的每个数字都有两层验证——SEC 文档的引用标注，加上可执行的 Python 代码；增长率、CAGR、基点变化都是代码算出来的，不是 LLM 推理的。第二，异步任务模式——用户提交分析任务，Agent 在后台自主执行，生成结构化 markdown 报告，而不是即时聊天回复。第三，跨会话研究记忆——每次任务完成后提取关键发现存入向量数据库，下次任务自动召回相关历史，Agent 有认知连续性。整个系统纯 Python，没有 LangChain，每个组件独立可测，有自定义 LLM-as-Judge 评测框架支撑设计决策，ragas_score 从 0.566 迭代到 0.685。"
