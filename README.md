@@ -144,24 +144,27 @@ Evaluated with 18 questions across three sets. Judge model: Gemini 2.5 Pro (sepa
 | Version | faithfulness | answer_relevancy | context_precision | context_recall | ragas_score |
 |---------|-------------|-----------------|------------------|---------------|-------------|
 | v1 (baseline) | 0.618 | 1.000 | 0.174 | 0.471 | 0.566 |
-| **v10 (current)** | **0.594** | **0.917** | **0.579** | **0.648** | **0.685** |
-| Δ | -0.023 | -0.083 | **+0.405** | **+0.178** | **+0.119** |
+| **v11 (current)** | **0.544** | **0.944** | **0.603** | **0.587** | **0.670** |
+| Δ | -0.073 | -0.056 | **+0.429** | **+0.116** | **+0.104** |
 
-Key improvements from v1 → v10:
-- `context_precision` +0.405: upgraded from holistic estimate to **Precision@K** (per-chunk relevance, rank-weighted)
-- `context_recall` +0.178: upgraded from holistic score to **atomic fact decomposition** (ground truth split into individual claims, each verified against context)
-- `faithfulness` / `answer_relevancy` slight decrease reflects stricter judging by Gemini 2.5 Pro, not answer quality degradation
-- Eval pipeline fixed: `run_eval.py` now calls `per_loop.run()` directly, so the `already_searched` anti-repeat is active during evaluation (was bypassed in v1)
+Key improvements from v1 → v11:
+- `context_precision` +0.429 (14/18 improved, 0 regressions): upgraded from holistic estimate to **Precision@K** (per-chunk boolean + rank-weighted average)
+- `context_recall` +0.116 (7/18 improved, 1 regression): upgraded from holistic score to **atomic fact decomposition**
+- `faithfulness` -0.073: Gemini 2.5 Pro is stricter than Flash Lite; Set B causal questions (B01/B02) are penalised because SEC filings contain numbers but not causal analysis — data ceiling, not a code issue
+- `answer_relevancy` fix: correctly-refusing-unanswerable questions (C03) now score 1.0 instead of 0.0
+- Eval pipeline fixed: `run_eval.py` now calls `per_loop.run()` directly, restoring the `already_searched` anti-repeat during evaluation
 
 ### Eval Infrastructure
 
-| Component | v1 | v10 |
+| Component | v1 | v11 |
 |-----------|----|----|
 | Judge model | gemini-3.1-flash-lite-preview (shared with pipeline) | gemini-2.5-pro (dedicated, configurable via `judge:` in config.yaml) |
 | context_precision | holistic fraction estimate | Precision@K — per-chunk boolean + rank-weighted average |
 | context_recall | holistic score | atomic fact decomposition — each ground-truth claim checked independently |
 | context window for judge | 3 000 chars / 15 chunks | 10 000 chars / 25 chunks |
 | Pipeline used during eval | reimplemented inline (missing `already_searched`) | `per_loop.run()` directly |
+| answer_relevancy for refusals | penalises correct "I cannot answer" responses | 1.0 for correctly-identified unanswerable questions |
+| Synthesizer background knowledge | soft "do not fabricate" warning | hard Rule 5: general knowledge does not exist for this answer |
 
 ---
 
@@ -328,7 +331,7 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 
 ## Failure Analysis
 
-15 documented bugs and optimizations in [`docs/failure_analysis.md`](docs/failure_analysis.md), including:
+17 documented bugs and optimizations in [`docs/failure_analysis.md`](docs/failure_analysis.md), including:
 
 - `sec-parser` returning 3.8M empty nodes → replaced with BeautifulSoup + regex
 - Synthesizer hallucination (faithfulness=0) → hardened to mandatory `[n]` citation rules
@@ -342,6 +345,8 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 - `context_recall` holistic score masking partial coverage → replaced with atomic fact decomposition
 - Gemini 2.5 Pro `resp.text` returning `None` → guarded with `(resp.text or "").strip()`
 - Eval duplicate rows when ragas_score is None → fixed `:.3f` format crash that triggered the except branch
+- `answer_relevancy` penalising correct refusals (C03: 0.0) → prompt updated to score 1.0 for unanswerable questions handled correctly
+- Synthesizer supplementing missing context with background knowledge (B01/B02 faithfulness) → added hard Rule 5: general knowledge does not exist for this answer
 
 ---
 

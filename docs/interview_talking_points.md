@@ -183,13 +183,23 @@ macro 数据的 context 显示的是 `UNRATE: 3.4`，ground truth 写的是 "US 
 *坑 4：Gemini 2.5 Pro `resp.text` 返回 None*
 思考模型（thinking model）在某些 prompt 下 `resp.text` 是 None，直接 `.strip()` 报 AttributeError。下游 `ragas_score` 因为 None 导致 f-string 格式化崩溃，触发 except 分支写入第二行，CSV 里每题出现重复行。两处修复：`(resp.text or "").strip()` + print 格式化用安全函数。
 
-**最终效果**（v1 → v10）：
+*坑 5：answer_relevancy judge 把"正确拒答"算作不相关（C03）*
+C03 问的是"如果 Fed 降息到零，Google 股价会怎样"——这是无法从历史财报回答的投机性问题。系统正确地说"无法回答"，但 relevancy judge 给了 0.0，理由是"答案没有回答问题"。根因：prompt 里 1.0 的定义只写了"直接完整地回答问题"，没有处理拒答场景。修复：补充一条"如果问题不可回答，正确说明这一点也是 1.0"。效果：C03 relevancy 0.0 → 1.0。
 
-| 指标 | v1 | v10 | Δ |
+*坑 6：Synthesizer 用背景知识填补缺失 context（B01/B02 faithfulness 低）*
+B02 问 COVID-19 对 Google 2020 年营收的影响。prompt 里写了"不得用背景知识"，但 Synthesizer 还是输出了"American Rescue Plan"、"shift to less commercial topics"等不在 context 里的内容。根因：软约束"do not fabricate"对 LLM 生成完整叙述的倾向对抗力不足。修复：加入 Rule 5——"你的通用知识对本次回答不存在，context 里没有的信息就不存在"。效果：B02 faithfulness 0.20 → 0.30（部分改善）。
+
+**B01/B02 faithfulness 的数据天花板**：这类因果题（"加息如何影响广告收入"）在 SEC 财报里找不到直接的因果分析，只有原始数字。Synthesizer 要么推断因果（被严格 judge 扣分），要么不推断（答案质量下降）。这是数据源的结构性局限，不是可完全修复的代码问题。添加分析师报告作为数据源才能根本解决。
+
+**最终效果**（v1 → v11）：
+
+| 指标 | v1 | v11 | Δ |
 |------|----|----|---|
-| context_precision | 0.174 | 0.579 | +0.405 |
-| context_recall | 0.471 | 0.648 | +0.178 |
-| ragas_score | 0.566 | 0.685 | +0.119 |
+| context_precision | 0.174 | **0.603** | **+0.429**（14/18 改善，0 回退） |
+| context_recall | 0.471 | 0.587 | +0.116 |
+| answer_relevancy | 1.000 | 0.944 | -0.056（C03 修复后整体仍略低，因 2.5 Pro 更严格） |
+| faithfulness | 0.618 | 0.544 | -0.073（judge 更严格 + B01/B02 数据天花板） |
+| ragas_score | 0.566 | **0.670** | **+0.104** |
 
 ---
 
@@ -213,4 +223,4 @@ macro 数据的 context 显示的是 `UNRATE: 3.4`，ground truth 写的是 "US 
 
 > 面试开场或 HR 初面用
 
-"MacroLens 是一个专注于 GOOGL 财报和美国宏观经济的研究 Agent，有别于普通 RAG 聊天机器人。核心差异有三点：第一，答案里的每个数字都有两层验证——SEC 文档的引用标注，加上可执行的 Python 代码；增长率、CAGR、基点变化都是代码算出来的，不是 LLM 推理的。第二，异步任务模式——用户提交分析任务，Agent 在后台自主执行，生成结构化 markdown 报告，而不是即时聊天回复。第三，跨会话研究记忆——每次任务完成后提取关键发现存入向量数据库，下次任务自动召回相关历史，Agent 有认知连续性。整个系统纯 Python，没有 LangChain，每个组件独立可测，有自定义 LLM-as-Judge 评测框架支撑设计决策，ragas_score 从 0.566 迭代到 0.685。"
+"MacroLens 是一个专注于 GOOGL 财报和美国宏观经济的研究 Agent，有别于普通 RAG 聊天机器人。核心差异有三点：第一，答案里的每个数字都有两层验证——SEC 文档的引用标注，加上可执行的 Python 代码；增长率、CAGR、基点变化都是代码算出来的，不是 LLM 推理的。第二，异步任务模式——用户提交分析任务，Agent 在后台自主执行，生成结构化 markdown 报告，而不是即时聊天回复。第三，跨会话研究记忆——每次任务完成后提取关键发现存入向量数据库，下次任务自动召回相关历史，Agent 有认知连续性。整个系统纯 Python，没有 LangChain，每个组件独立可测，有自定义 LLM-as-Judge 评测框架支撑设计决策，ragas_score 从 0.566 迭代到 0.670，context_precision 从 0.174 提升到 0.603。"
