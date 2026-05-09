@@ -242,7 +242,9 @@ uv run agent/per_loop.py --max-iter 3 --verbose "What are Google's main risk fac
 ### Evaluation
 
 ```bash
-uv run eval/run_eval.py --sets A B C
+uv run eval/run_eval.py --sets A B C --output eval/results_v10.csv
+uv run eval/compare_versions.py eval/results_v1.csv eval/results_v10.csv
+uv run eval/compare_versions.py eval/results_v1.csv eval/results_v10.csv --plot
 uv run eval/chunk_ablation.py --files 3
 ```
 
@@ -331,7 +333,7 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 
 ## Failure Analysis
 
-17 documented bugs and optimizations in [`docs/failure_analysis.md`](docs/failure_analysis.md), including:
+18 documented bugs and optimizations in [`docs/failure_analysis.md`](docs/failure_analysis.md), including:
 
 - `sec-parser` returning 3.8M empty nodes → replaced with BeautifulSoup + regex
 - Synthesizer hallucination (faithfulness=0) → hardened to mandatory `[n]` citation rules
@@ -339,6 +341,7 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 - Chunk ablation scoring 0 due to year mismatch → reversed sort to select most recent filings
 - Critic dead loop → anti-repeat fixed Set B +0.029
 - `<compute>` output appearing as isolated line → replaced `<compute>` tag + regex with compute Tool Use agentic loop; orphaned-line cleanup no longer needed
+- Section detection bug (4 compounding issues: `\xa0`, case, TOC vs body, startswith ambiguity) → fixed; MD&A 2→30 chunks, Risk Factors 0→34 chunks
 - Eval pipeline reimplementation bypassing `already_searched` → replaced with direct `per_loop.run()` call
 - Eval context truncation (3 000 chars) hiding evidence from judge → expanded to 10 000 chars / 25 chunks
 - `context_precision` holistic estimate not reflecting ranking quality → replaced with Precision@K

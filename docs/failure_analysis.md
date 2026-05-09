@@ -139,7 +139,7 @@ s.name, s.unit
 - 移除 executor SEC 查询中的 section 过滤，只保留 `fiscal_year` 过滤。  
 - `config.yaml` 中 `top_k: 8 → 12`，`candidate_k: 15 → 20`。
 
-**待解决**：section 检测 bug（`\xa0` 问题）仍存在，重新 ingestion 时需修复正则。
+**后续修复**（Bug #18）：`\xa0` 只是入口，实际存在四个叠加问题——见 Bug #18。
 
 ---
 
@@ -382,5 +382,35 @@ SYSTEM_PROMPT 有三条硬规则，但都指向"找不到来源就不写"。LLM 
 **残余问题**：B01/B02 这类因果分析题（"加息如何影响广告收入"）在 SEC 财报中找不到直接的因果陈述，只有孤立的数字。Rule 5 可以阻止 Synthesizer 补充背景叙述，但无法提供财报中本不存在的因果分析。这是数据源的结构性局限，根本解决方案是引入分析师报告。
 
 **教训**：对于叙事性强的事件（COVID、经济危机），LLM 极难严格区分"来自 context"和"来自训练数据"的信息。Synthesizer 的 faithfulness 对于此类题目存在系统性天花板。
+
+---
+
+## Bug #18：Section 检测四重叠加问题（ingest_sec.py）
+
+**现象**  
+FY2022 10-K 的 `sec_chunks` 中，MD&A 只有 2–5 条，Risk Factors 为 0 条，所有 chunk 几乎全部被归入 `Business`。
+
+**根因（四重叠加，每项独立都会导致错误）**
+
+1. **`\xa0` 未 normalize**：`soup.get_text()` 把 HTML `&nbsp;` 保留为 `\xa0`（non-breaking space）。虽然正则包含 `\xa0`，但 HTML 里有时是多个 `\xa0` 混合普通空格，导致部分标题不匹配。修复：`full_text.replace("\xa0", " ")`。
+
+2. **无 `re.IGNORECASE`**：10-K 正文标题是全大写（`ITEM 7.\nMANAGEMENT'S DISCUSSION...`），目录是混合大小写（`Item 7. Management's...`）。正则无 `re.IGNORECASE` 时只匹配目录，正文标题完全被忽略。修复：加 `re.IGNORECASE`。
+
+3. **目录边界覆盖正文边界**：`findall` 按位置顺序返回，目录出现在前（位置 ~6000–7500）；用 list 保留所有匹配时，每个 Item 在 TOC 和正文各有一次，两次边界都被记录。结果是 TOC 里 `Item 7` 到 `Item 7A` 之间只有一个页码（2 个 chunk），正文里的真实 MD&A 内容被错误地归入前一个 section。修复：用 `seen` dict 对每个 item 编号只保留最后一次出现位置（正文 > 目录）。
+
+4. **`SECTION_MAP` startswith 误匹配**：`"item 1a...".startswith("item 1")` 为 True，导致所有 Item 1A（Risk Factors）内容被错误归入 Item 1（Business）。修复：改用 `re.match(rf"{re.escape(k)}[\s.]", section.lower())` 加 word-boundary。
+
+5. **旧数据残留**：`ON CONFLICT DO NOTHING` 无唯一约束，等价于总是插入，re-ingest 时旧版 section 名称的 chunk 累积在库中。修复：re-ingest 前 `TRUNCATE TABLE sec_chunks`。
+
+**修复效果**
+
+| Section | 修复前 | 修复后 |
+|---------|-------|-------|
+| Business | ~535 | 12 |
+| Risk Factors | 0 | 34 |
+| MD&A | 2–5 | 30 |
+| Financial Statements | 2–3 | 72 |
+
+**教训**：HTML 文档（SEC 10-K）有目录 + 正文两个结构层次，基于文本的正则 section 检测容易同时匹配两者。应优先取最后出现位置（正文），而非第一次（目录）。section 字段校验应在 ingest 后立即查询 DB 分布，而不是等到 eval 分数异常时才发现。
 
 ---
