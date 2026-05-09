@@ -129,6 +129,18 @@ After each task, an LLM call extracts 2-4 key findings and stores them as vector
 
 ## Evaluation Results
 
+### Retrieval Evaluation (Hit@K / MRR@K)
+
+Evaluated on 4 factual SEC questions (Set A) using key-fact text matching against RRF-ranked chunks. No LLM calls required.
+
+| K | Hit@K | MRR@K |
+|---|-------|-------|
+| 1 | 0.750 | 0.750 |
+| **3** | **1.000** | **0.875** |
+| 5 | 1.000 | 0.875 |
+
+All 4 questions retrieve a relevant chunk within top-3. MRR@3 = 0.875 indicates the relevant chunk ranks first for 3 of 4 questions (A01 ranks 2nd).
+
 ### Chunk Strategy Ablation (3 most recent 10-K filings, Set A questions)
 
 | Strategy | Precision | Recall | Avg Tokens |
