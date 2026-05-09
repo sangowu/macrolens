@@ -144,27 +144,34 @@ Evaluated with 18 questions across three sets. Judge model: Gemini 2.5 Pro (sepa
 | Version | faithfulness | answer_relevancy | context_precision | context_recall | ragas_score |
 |---------|-------------|-----------------|------------------|---------------|-------------|
 | v1 (baseline) | 0.618 | 1.000 | 0.174 | 0.471 | 0.566 |
-| **v11 (current)** | **0.544** | **0.944** | **0.603** | **0.587** | **0.670** |
-| Δ | -0.073 | -0.056 | **+0.429** | **+0.116** | **+0.104** |
+| v11 (eval methodology) | 0.544 | 0.944 | 0.603 | 0.587 | 0.670 |
+| **v12 (current)** | **0.667** | **0.972** | **0.688** | **0.651** | **0.741** |
+| v11→v12 Δ | **+0.123** | +0.028 | +0.085 | +0.064 | **+0.071** |
+| v1→v12 Δ | +0.049 | -0.028 | **+0.514** | **+0.180** | **+0.175** |
 
-Key improvements from v1 → v11:
-- `context_precision` +0.429 (14/18 improved, 0 regressions): upgraded from holistic estimate to **Precision@K** (per-chunk boolean + rank-weighted average)
-- `context_recall` +0.116 (7/18 improved, 1 regression): upgraded from holistic score to **atomic fact decomposition**
-- `faithfulness` -0.073: Gemini 2.5 Pro is stricter than Flash Lite; Set B causal questions (B01/B02) are penalised because SEC filings contain numbers but not causal analysis — data ceiling, not a code issue
-- `answer_relevancy` fix: correctly-refusing-unanswerable questions (C03) now score 1.0 instead of 0.0
-- Eval pipeline fixed: `run_eval.py` now calls `per_loop.run()` directly, restoring the `already_searched` anti-repeat during evaluation
+Key improvements from v1 → v11 (eval methodology):
+- `context_precision` +0.429: upgraded from holistic estimate to **Precision@K** (per-chunk boolean + rank-weighted average)
+- `context_recall` +0.116: upgraded from holistic score to **atomic fact decomposition**
+- `faithfulness` -0.073: Gemini 2.5 Pro is stricter than Flash Lite; Set B causal questions penalised — data ceiling, not a code issue
+- `answer_relevancy`: correctly-refusing-unanswerable questions (C03) now score 1.0 instead of 0.0
+- Eval pipeline: `run_eval.py` now calls `per_loop.run()` directly, restoring `already_searched` anti-repeat
+
+Key improvements from v11 → v12 (section detection fix, Bug #18):
+- `faithfulness` +0.123: retrieved chunks now contain actual MD&A / Risk Factors content instead of TOC fragments — LLM can verify its claims against real substance
+- All four metrics improved: section boundaries now correctly partition 10-K body text (MD&A 2→30, Risk Factors 0→34, Financial Statements 2→72 chunks)
 
 ### Eval Infrastructure
 
-| Component | v1 | v11 |
-|-----------|----|----|
-| Judge model | gemini-3.1-flash-lite-preview (shared with pipeline) | gemini-2.5-pro (dedicated, configurable via `judge:` in config.yaml) |
-| context_precision | holistic fraction estimate | Precision@K — per-chunk boolean + rank-weighted average |
-| context_recall | holistic score | atomic fact decomposition — each ground-truth claim checked independently |
-| context window for judge | 3 000 chars / 15 chunks | 10 000 chars / 25 chunks |
-| Pipeline used during eval | reimplemented inline (missing `already_searched`) | `per_loop.run()` directly |
-| answer_relevancy for refusals | penalises correct "I cannot answer" responses | 1.0 for correctly-identified unanswerable questions |
-| Synthesizer background knowledge | soft "do not fabricate" warning | hard Rule 5: general knowledge does not exist for this answer |
+| Component | v1 | v11 | v12 |
+|-----------|----|----|-----|
+| Judge model | gemini-3.1-flash-lite-preview (shared with pipeline) | gemini-2.5-pro (dedicated, configurable via `judge:` in config.yaml) | same as v11 |
+| context_precision | holistic fraction estimate | Precision@K — per-chunk boolean + rank-weighted average | same as v11 |
+| context_recall | holistic score | atomic fact decomposition — each ground-truth claim checked independently | same as v11 |
+| context window for judge | 3 000 chars / 15 chunks | 10 000 chars / 25 chunks | same as v11 |
+| Pipeline used during eval | reimplemented inline (missing `already_searched`) | `per_loop.run()` directly | same as v11 |
+| answer_relevancy for refusals | penalises correct "I cannot answer" responses | 1.0 for correctly-identified unanswerable questions | same as v11 |
+| Synthesizer background knowledge | soft "do not fabricate" warning | hard Rule 5: general knowledge does not exist for this answer | same as v11 |
+| SEC chunk section accuracy | TOC-based (MD&A 2, Risk 0, FinStmt 2) | same as v1 | fixed (MD&A 30, Risk 34, FinStmt 72) |
 
 ---
 
@@ -341,7 +348,7 @@ Ablation results: Fixed achieves higher precision (0.062 vs 0.000) with uniform 
 - Chunk ablation scoring 0 due to year mismatch → reversed sort to select most recent filings
 - Critic dead loop → anti-repeat fixed Set B +0.029
 - `<compute>` output appearing as isolated line → replaced `<compute>` tag + regex with compute Tool Use agentic loop; orphaned-line cleanup no longer needed
-- Section detection bug (4 compounding issues: `\xa0`, case, TOC vs body, startswith ambiguity) → fixed; MD&A 2→30 chunks, Risk Factors 0→34 chunks
+- Section detection bug (4 compounding issues: `\xa0`, case, TOC vs body, startswith ambiguity) → fixed; MD&A 2→30 chunks, Risk Factors 0→34 chunks; faithfulness +0.123, ragas_score +0.071
 - Eval pipeline reimplementation bypassing `already_searched` → replaced with direct `per_loop.run()` call
 - Eval context truncation (3 000 chars) hiding evidence from judge → expanded to 10 000 chars / 25 chunks
 - `context_precision` holistic estimate not reflecting ranking quality → replaced with Precision@K
