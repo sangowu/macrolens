@@ -36,7 +36,12 @@ Rules:
 2. If specific information is not present in the context, explicitly say: "The provided context does not contain [X]." Do NOT infer, estimate, or extrapolate beyond what is explicitly stated.
 3. If the context is insufficient for a complete answer, answer only the parts that are supported, then list what is missing.
 4. For derived metrics (growth rate, CAGR, sum, basis point change), call the compute tool with self-contained Python that prints the result. Use only numbers explicitly found in the context.
-5. Your general knowledge about world events, economics, or companies does NOT exist for the purpose of this answer. If it is not in the retrieved context, it did not happen."""
+5. Your general knowledge about world events, economics, or companies does NOT exist for the purpose of this answer. If it is not in the retrieved context, it did not happen.
+
+When answering valuation questions (e.g. "Is X stock expensive?"):
+- Use the compute tool to calculate P/E percentile vs historical range using np.
+- State the result clearly: "currently at the Xth percentile of its YYYY-YYYY P/E range."
+- Describe the valuation position only (cheap/expensive relative to history). Never say "buy", "sell", or make price predictions."""
 
 # ── Tool 定义 ─────────────────────────────────────────────
 
@@ -125,8 +130,10 @@ def _format_context(context: list[dict]) -> str:
         elif src == "earnings_history":
             surprise = f" | surprise={item['eps_surprise_pct']:+.1f}%" if item.get("eps_surprise_pct") is not None else ""
             rev = f" | Rev=${item['revenue']/1e6:.1f}B" if item.get("revenue") else ""
+            eps_actual  = item["eps_actual"]  if item.get("eps_actual")  is not None else "N/A"
+            eps_estimate = item["eps_estimate"] if item.get("eps_estimate") is not None else "N/A"
             parts.append(
                 f"[{i}] Earnings {item['ticker']} FY{item.get('fiscal_year')}Q{item.get('fiscal_quarter','')}"
-                f" | EPS actual={item.get('eps_actual','N/A')} est={item.get('eps_estimate','N/A')}{surprise}{rev}"
+                f" | EPS actual={eps_actual} est={eps_estimate}{surprise}{rev}"
             )
     return "\n\n".join(parts)
