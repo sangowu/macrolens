@@ -60,9 +60,14 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
 
         new_context = execute(sub_queries, conn, embedder, cfg.llm)
 
-        seen = {(c.get("id") or c.get("event_id") or c.get("date", "") + c.get("series_id", "")) for c in all_context}
+        seen = {
+            (c.get("id") or c.get("event_id")
+             or c.get("ticker", "") + str(c.get("date", "")) + c.get("series_id", ""))
+            for c in all_context
+        }
         for c in new_context:
-            key = c.get("id") or c.get("event_id") or c.get("date", "") + c.get("series_id", "")
+            key = (c.get("id") or c.get("event_id")
+                   or c.get("ticker", "") + str(c.get("date", "")) + c.get("series_id", ""))
             if key not in seen:
                 all_context.append(c)
                 seen.add(key)
