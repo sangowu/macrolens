@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 You are a financial research planner for MacroLens, a RAG system covering:
-- GOOGL SEC filings (10-K / 10-Q / 8-K) in table `sec_chunks`
+- SEC filings (10-K / 10-Q / 8-K) for MAG7 companies in table `sec_chunks`
 - Macroeconomic & industry events (Fed policy, earnings, antitrust) in table `events`
 - US macro time-series (GDP, CPI, UNRATE, etc.) in table `macro_indicators`
 
+Supported tickers for sec_chunks: GOOGL, MSFT, META, AMZN, AAPL, NVDA, TSLA
 Available macro series: GDP, GDPC1, CPIAUCSL, UNRATE, FEDFUNDS, T10Y2Y, PAYEMS, HOUST, INDPRO, RSAFS, UMCSENT, DCOILWTICO
-
 Available event categories: fed_policy, company_action, macro_shock, industry
 
 Decompose the user question into 1-4 sub-queries using the create_query_plan tool.
@@ -25,10 +25,12 @@ Decompose the user question into 1-4 sub-queries using the create_query_plan too
 Source routing rules:
 - Use "macro_indicators" for any question about specific economic data series: interest rates, GDP, CPI, unemployment, Fed funds rate, inflation, retail sales, oil prices, etc.
 - Use "events" for questions about specific events: Fed policy decisions, earnings announcements, antitrust actions.
-- Use "sec_chunks" for questions about Google/Alphabet financial results, risk factors, business descriptions.
+- Use "sec_chunks" for questions about company financial results, risk factors, business descriptions.
 
 For macro_indicators: always include "series" (list of series IDs) and optionally "date_from"/"date_to" (YYYY-MM-DD).
 For sec_chunks: ALWAYS include "fiscal_year" (integer) when the question mentions a specific year. Only add "section" when explicitly asked.
+  For competitor comparison questions, include multiple tickers in filters.company (e.g. ["GOOGL", "MSFT"]).
+  If no company is specified, default to filters.company = ["GOOGL"].
 For events: optionally include "category".
 
 Example — "What was the Federal Funds Rate in December 2022?":
@@ -36,8 +38,12 @@ Example — "What was the Federal Funds Rate in December 2022?":
 
 Example — "How did rate hikes in 2022 affect Google revenue?":
 [{"query": "Federal Reserve rate hikes 2022", "sources": ["events"], "filters": {"category": "fed_policy"}},
- {"query": "Google advertising revenue 2022", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2022}},
- {"query": "Federal Funds Rate 2022", "sources": ["macro_indicators"], "filters": {"series": ["FEDFUNDS"], "date_from": "2022-01-01", "date_to": "2022-12-31"}}]"""
+ {"query": "Google advertising revenue 2022", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2022, "company": ["GOOGL"]}},
+ {"query": "Federal Funds Rate 2022", "sources": ["macro_indicators"], "filters": {"series": ["FEDFUNDS"], "date_from": "2022-01-01", "date_to": "2022-12-31"}}]
+
+Example — "Compare Google Cloud and Microsoft Azure revenue 2023":
+[{"query": "Google Cloud revenue growth 2023", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2023, "company": ["GOOGL"]}},
+ {"query": "Microsoft Azure cloud revenue 2023", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2023, "company": ["MSFT"]}}]"""
 
 _PLAN_TOOL = {
     "name": "create_query_plan",
@@ -61,7 +67,7 @@ _PLAN_TOOL = {
                             "type": "array",
                             "items": {
                                 "type": "string",
-                                "enum": ["sec_chunks", "events", "macro_indicators"],
+                                "enum": ["sec_chunks", "events", "macro_indicators", "price_history", "earnings_history"],
                             },
                             "description": "Data sources to search.",
                         },
@@ -93,6 +99,29 @@ _PLAN_TOOL = {
                                 "category": {
                                     "type": "string",
                                     "description": "Optional for events: fed_policy, company_action, macro_shock, industry",
+                                },
+                                "company": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "For sec_chunks: ticker(s) to filter, e.g. ['GOOGL'] or ['GOOGL','MSFT']. Supported: GOOGL, MSFT, META, AMZN, AAPL, NVDA, TSLA. Defaults to ['GOOGL'].",
+                                },
+                                "tickers": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "For price_history and earnings_history: list of stock tickers, e.g. ['GOOGL','MSFT']. Defaults to ['GOOGL'].",
+                                },
+                                "period_type": {
+                                    "type": "string",
+                                    "enum": ["quarterly", "annual"],
+                                    "description": "For earnings_history: 'quarterly' or 'annual'. Defaults to 'quarterly'.",
+                                },
+                                "year_from": {
+                                    "type": "integer",
+                                    "description": "For earnings_history: fiscal year range start.",
+                                },
+                                "year_to": {
+                                    "type": "integer",
+                                    "description": "For earnings_history: fiscal year range end.",
                                 },
                             },
                         },

@@ -24,6 +24,7 @@ WITH semantic AS (
     FROM sec_chunks
     WHERE embedding IS NOT NULL
       {section_filter}
+      {company_filter}
       {year_filter}
     ORDER BY embedding <=> %(vec)s::vector
     LIMIT %(candidate_k)s
@@ -36,6 +37,7 @@ lexical AS (
     FROM sec_chunks
     WHERE content_tsv @@ websearch_to_tsquery('english', %(query)s)
       {section_filter}
+      {company_filter}
       {year_filter}
     LIMIT %(candidate_k)s
 ),
@@ -141,6 +143,21 @@ ORDER BY m.series_id, m.date
 """
 
 
+_ALLOWED_COMPANIES = frozenset({"GOOGL", "MSFT", "META", "AMZN", "AAPL", "NVDA", "TSLA"})
+
+
+def _build_company_filter(filters: dict) -> str:
+    """从 filters['company'] 构建 SQL WHERE 片段，使用白名单防止注入。"""
+    raw = filters.get("company", [])
+    if isinstance(raw, str):
+        raw = [raw]
+    companies = [c for c in raw if c in _ALLOWED_COMPANIES]
+    if not companies:
+        return ""
+    quoted = ", ".join(f"'{c}'" for c in companies)
+    return f"AND company IN ({quoted})"
+
+
 def _search_sec(
     conn: psycopg.Connection,
     embedder: EmbeddingBackend,
@@ -154,7 +171,14 @@ def _search_sec(
     if "fiscal_year" in filters:
         year_filter = f"AND fiscal_year = {int(filters['fiscal_year'])}"
 
-    sql = SEC_RRF_SQL.format(section_filter="", year_filter=year_filter, rrf_k=RRF_K)
+    company_filter = _build_company_filter(filters)
+
+    sql = SEC_RRF_SQL.format(
+        section_filter="",
+        company_filter=company_filter,
+        year_filter=year_filter,
+        rrf_k=RRF_K,
+    )
     rows = conn.execute(sql, {"vec": vec, "query": query, "candidate_k": candidate_k, "top_k": top_k}).fetchall()
 
     return [
