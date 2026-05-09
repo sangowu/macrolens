@@ -43,7 +43,23 @@ Example — "How did rate hikes in 2022 affect Google revenue?":
 
 Example — "Compare Google Cloud and Microsoft Azure revenue 2023":
 [{"query": "Google Cloud revenue growth 2023", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2023, "company": ["GOOGL"]}},
- {"query": "Microsoft Azure cloud revenue 2023", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2023, "company": ["MSFT"]}}]"""
+ {"query": "Microsoft Azure cloud revenue 2023", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2023, "company": ["MSFT"]}}]
+
+- Stock price history and valuation ratios (P/E) in table `price_history`
+- Quarterly/annual earnings with EPS actual vs estimate in table `earnings_history`
+Use "price_history" for questions about stock price trends, P/E ratio, valuation, or price-vs-macro correlation.
+  For price_history: include tickers (default ['GOOGL']), date_from, date_to.
+Use "earnings_history" for questions about EPS, earnings beat/miss, revenue trends, quarterly results.
+  For earnings_history: include tickers, period_type ('quarterly'/'annual'), year_from, year_to.
+
+Example — "Is GOOGL expensive right now?":
+[{"query": "GOOGL stock price and P/E ratio 2019-2025", "sources": ["price_history"], "filters": {"tickers": ["GOOGL"], "date_from": "2019-01-01", "date_to": "2025-12-31"}},
+ {"query": "GOOGL quarterly EPS history", "sources": ["earnings_history"], "filters": {"tickers": ["GOOGL"], "period_type": "quarterly", "year_from": 2019, "year_to": 2025}},
+ {"query": "Alphabet business outlook 2024", "sources": ["sec_chunks"], "filters": {"fiscal_year": 2024, "company": ["GOOGL"]}}]
+
+Example — "What is the correlation between Fed rate hikes and GOOGL stock price?":
+[{"query": "GOOGL daily stock price 2022-2023", "sources": ["price_history"], "filters": {"tickers": ["GOOGL"], "date_from": "2022-01-01", "date_to": "2023-12-31"}},
+ {"query": "Federal Funds Rate 2022-2023", "sources": ["macro_indicators"], "filters": {"series": ["FEDFUNDS"], "date_from": "2022-01-01", "date_to": "2023-12-31"}}]"""
 
 _PLAN_TOOL = {
     "name": "create_query_plan",

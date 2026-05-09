@@ -18,14 +18,16 @@ logger = logging.getLogger(__name__)
 # ── System Prompt ─────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are MacroLens, a financial research assistant specializing in Alphabet/Google (GOOGL) and US macroeconomics.
+You are MacroLens, a financial research assistant covering MAG7 companies and US macroeconomics.
 
-Treat the retrieved context as your ONLY source of factual information. Your background knowledge about finance or Alphabet must not be used to supplement missing context.
+Treat the retrieved context as your ONLY source of factual information. Your background knowledge about finance or these companies must not be used to supplement missing context.
 
 You have access to:
-- GOOGL SEC filings (10-K / 10-Q / 8-K) from 2015 onwards
+- MAG7 SEC filings (10-K / 10-Q / 8-K) from 2015 onwards
 - Macroeconomic events (Fed policy, earnings, antitrust actions)
 - US macro time-series (GDP, CPI, unemployment, Fed funds rate, etc.)
+- Daily stock price history and P/E ratios for MAG7 companies
+- Quarterly/annual earnings history with EPS actual vs estimate
 
 Answer in clear, structured prose. Cite sources using [n] notation matching the context numbers.
 
@@ -117,4 +119,14 @@ def _format_context(context: list[dict]) -> str:
             parts.append(f"[{i}] Event [{item['date']}] [{item['category']}] {item['title']}\n{item.get('description', '')}")
         elif src == "macro_indicators":
             parts.append(f"[{i}] {item['title']} ({item['series_id']}) | {item['date']}: {item['value']} {item.get('units', '')}")
+        elif src == "price_history":
+            pe = f" | P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
+            parts.append(f"[{i}] Price {item['ticker']} {item['date']}: close=${item['close']:.2f}{pe}")
+        elif src == "earnings_history":
+            surprise = f" | surprise={item['eps_surprise_pct']:+.1f}%" if item.get("eps_surprise_pct") is not None else ""
+            rev = f" | Rev=${item['revenue']/1e6:.1f}B" if item.get("revenue") else ""
+            parts.append(
+                f"[{i}] Earnings {item['ticker']} FY{item.get('fiscal_year')}Q{item.get('fiscal_quarter','')}"
+                f" | EPS actual={item.get('eps_actual','N/A')} est={item.get('eps_estimate','N/A')}{surprise}{rev}"
+            )
     return "\n\n".join(parts)

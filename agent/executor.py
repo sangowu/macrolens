@@ -260,6 +260,106 @@ def _search_macro(
     ]
 
 
+PRICE_HISTORY_SQL = """
+SELECT ticker, date, close, adj_close, volume, pe_ratio, ps_ratio
+FROM price_history
+WHERE ticker = ANY(%(tickers)s)
+  AND date >= %(date_from)s
+  AND date <= %(date_to)s
+ORDER BY ticker, date
+"""
+
+EARNINGS_HISTORY_SQL = """
+SELECT ticker, period_end, fiscal_year, fiscal_quarter, period_type,
+       revenue, net_income, eps_actual, eps_estimate,
+       eps_surprise, eps_surprise_pct,
+       cloud_revenue, ads_revenue,
+       gross_margin, operating_margin
+FROM earnings_history
+WHERE ticker = ANY(%(tickers)s)
+  AND period_type = %(period_type)s
+  AND fiscal_year >= %(year_from)s
+  AND fiscal_year <= %(year_to)s
+ORDER BY ticker, period_end
+"""
+
+
+def _search_price_history(
+    conn: psycopg.Connection,
+    filters: dict,
+) -> list[dict]:
+    """精确范围查询 price_history，返回日线价格和估值数据。"""
+    raw_tickers = filters.get("tickers", ["GOOGL"])
+    if isinstance(raw_tickers, str):
+        raw_tickers = [raw_tickers]
+    tickers = [t for t in raw_tickers if t in _ALLOWED_COMPANIES] or ["GOOGL"]
+
+    date_from = filters.get("date_from", "2019-01-01")
+    date_to   = filters.get("date_to", "2026-12-31")
+
+    rows = conn.execute(
+        PRICE_HISTORY_SQL,
+        {"tickers": tickers, "date_from": date_from, "date_to": date_to},
+    ).fetchall()
+
+    return [
+        {
+            "source":    "price_history",
+            "ticker":    r[0],
+            "date":      str(r[1]),
+            "close":     float(r[2]) if r[2] is not None else None,
+            "adj_close": float(r[3]) if r[3] is not None else None,
+            "volume":    r[4],
+            "pe_ratio":  float(r[5]) if r[5] is not None else None,
+            "ps_ratio":  float(r[6]) if r[6] is not None else None,
+        }
+        for r in rows
+    ]
+
+
+def _search_earnings_history(
+    conn: psycopg.Connection,
+    filters: dict,
+) -> list[dict]:
+    """精确范围查询 earnings_history，返回季度/年度财报数据。"""
+    raw_tickers = filters.get("tickers", ["GOOGL"])
+    if isinstance(raw_tickers, str):
+        raw_tickers = [raw_tickers]
+    tickers = [t for t in raw_tickers if t in _ALLOWED_COMPANIES] or ["GOOGL"]
+
+    period_type = filters.get("period_type", "quarterly")
+    year_from   = int(filters.get("year_from", 2018))
+    year_to     = int(filters.get("year_to", 2030))
+
+    rows = conn.execute(
+        EARNINGS_HISTORY_SQL,
+        {"tickers": tickers, "period_type": period_type,
+         "year_from": year_from, "year_to": year_to},
+    ).fetchall()
+
+    return [
+        {
+            "source":           "earnings_history",
+            "ticker":           r[0],
+            "period_end":       str(r[1]),
+            "fiscal_year":      r[2],
+            "fiscal_quarter":   r[3],
+            "period_type":      r[4],
+            "revenue":          float(r[5]) if r[5] is not None else None,
+            "net_income":       float(r[6]) if r[6] is not None else None,
+            "eps_actual":       float(r[7]) if r[7] is not None else None,
+            "eps_estimate":     float(r[8]) if r[8] is not None else None,
+            "eps_surprise":     float(r[9]) if r[9] is not None else None,
+            "eps_surprise_pct": float(r[10]) if r[10] is not None else None,
+            "cloud_revenue":    float(r[11]) if r[11] is not None else None,
+            "ads_revenue":      float(r[12]) if r[12] is not None else None,
+            "gross_margin":     float(r[13]) if r[13] is not None else None,
+            "operating_margin": float(r[14]) if r[14] is not None else None,
+        }
+        for r in rows
+    ]
+
+
 def execute(
     sub_queries: list[dict],
     conn: psycopg.Connection,
@@ -282,5 +382,9 @@ def execute(
                 context.extend(_search_events(conn, embedder, query, filters, cfg.candidate_k, cfg.top_k))
             elif source == "macro_indicators":
                 context.extend(_search_macro(conn, filters))
+            elif source == "price_history":
+                context.extend(_search_price_history(conn, filters))
+            elif source == "earnings_history":
+                context.extend(_search_earnings_history(conn, filters))
 
     return context

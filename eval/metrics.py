@@ -97,6 +97,15 @@ def _format_context_flat(context: list[dict], max_chars: int = 10000) -> str:
             text = f"[{i}][SEC {item.get('doc_type','')} FY{item.get('fiscal_year','')}] {item['content'][:600]}"
         elif src == "events":
             text = f"[{i}][Event {item.get('date','')}] {item.get('title','')}: {item.get('description','')[:400]}"
+        elif src == "price_history":
+            pe = f" P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
+            text = f"[{i}][Price {item.get('ticker','')} {item.get('date','')}] close={item.get('close','')}{pe}"
+        elif src == "earnings_history":
+            text = (
+                f"[{i}][Earnings {item.get('ticker','')} FY{item.get('fiscal_year','')}Q{item.get('fiscal_quarter','')}]"
+                f" EPS={item.get('eps_actual','N/A')} est={item.get('eps_estimate','N/A')}"
+                f" surprise={item.get('eps_surprise_pct','N/A')}%"
+            )
         else:
             title = item.get('title') or item.get('series_id', '')
             text = f"[{i}][Macro {title} ({item.get('series_id','')}) {item.get('date','')}] {item.get('value','')} {item.get('units','')}"
@@ -115,6 +124,15 @@ def _format_context_list(context: list[dict], max_items: int = 25) -> str:
             lines.append(f"[{i}] SEC {item.get('doc_type','')} FY{item.get('fiscal_year','')} | {item['content'][:300]}")
         elif src == "events":
             lines.append(f"[{i}] Event | {item.get('title','')[:100]}")
+        elif src == "price_history":
+            pe = f" P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
+            lines.append(f"[{i}] Price {item.get('ticker','')} {item.get('date','')} close={item.get('close','')}{pe}")
+        elif src == "earnings_history":
+            lines.append(
+                f"[{i}] Earnings {item.get('ticker','')} FY{item.get('fiscal_year','')}Q{item.get('fiscal_quarter','')} "
+                f"EPS={item.get('eps_actual','N/A')} est={item.get('eps_estimate','N/A')} "
+                f"surprise={item.get('eps_surprise_pct','N/A')}%"
+            )
         else:
             title = item.get('title') or item.get('series_id', '')
             lines.append(f"[{i}] Macro {title} ({item.get('series_id','')}) {item.get('date','')} = {item.get('value','')} {item.get('units','')}")

@@ -35,9 +35,11 @@ def write_report(
         f"",
     ]
 
-    sec_items = [c for c in context if c["source"] == "sec_chunks"]
-    event_items = [c for c in context if c["source"] == "events"]
-    macro_items = [c for c in context if c["source"] == "macro_indicators"]
+    sec_items      = [c for c in context if c["source"] == "sec_chunks"]
+    event_items    = [c for c in context if c["source"] == "events"]
+    macro_items    = [c for c in context if c["source"] == "macro_indicators"]
+    price_items    = [c for c in context if c["source"] == "price_history"]
+    earnings_items = [c for c in context if c["source"] == "earnings_history"]
 
     if sec_items:
         lines += [f"### SEC Filings ({len(sec_items)})", ""]
@@ -61,6 +63,27 @@ def write_report(
         lines.append("|--------|------|-------|")
         for c in macro_items:
             lines.append(f"| {c['series_id']} | {c['date']} | {c['value']} {c.get('units','')} |")
+        lines.append("")
+
+    if price_items:
+        lines += [f"### Price History ({len(price_items)})", ""]
+        lines.append("| Ticker | Date | Close | P/E |")
+        lines.append("|--------|------|-------|-----|")
+        for c in price_items:
+            pe = f"{c['pe_ratio']:.1f}" if c.get("pe_ratio") else "N/A"
+            lines.append(f"| {c['ticker']} | {c['date']} | ${c['close']:.2f} | {pe} |")
+        lines.append("")
+
+    if earnings_items:
+        lines += [f"### Earnings History ({len(earnings_items)})", ""]
+        lines.append("| Ticker | Period | EPS Actual | EPS Estimate | Surprise |")
+        lines.append("|--------|--------|-----------|-------------|---------|")
+        for c in earnings_items:
+            surprise = f"{c['eps_surprise_pct']:+.1f}%" if c.get("eps_surprise_pct") is not None else "N/A"
+            lines.append(
+                f"| {c.get('ticker','')} | FY{c.get('fiscal_year','')}Q{c.get('fiscal_quarter','')} "
+                f"| {c.get('eps_actual','N/A')} | {c.get('eps_estimate','N/A')} | {surprise} |"
+            )
         lines.append("")
 
     lines += [
