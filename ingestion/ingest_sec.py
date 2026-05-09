@@ -143,15 +143,24 @@ def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, chunk_tokens: int =
         for tag in soup(["script", "style", "ix:header", "ix:hidden"]):
             tag.decompose()
         full_text = soup.get_text(separator="\n")
+        full_text = full_text.replace("\xa0", " ")  # normalize non-breaking spaces
     except Exception as e:
         print(f"  [ERR] 解析失败 {html_path.parent.name}: {e}")
         return []
 
     # 按 Item 边界切分 section
+    # 目录中每个 Item 都会出现一次，正文中再出现一次；只取最后一次作为真实边界
     item_pattern = re.compile(
-        r"(?:^|\n)[ \t]*(Item[\s\xa0]+\d+[A-Za-z]?[\.\s\xa0]+[A-Z][^\n]{3,80})", re.MULTILINE
+        r"(?:^|\n)[ \t]*(Item\s+\d+[A-Za-z]?[.\s]+[A-Za-z][^\n]{3,80})",
+        re.MULTILINE | re.IGNORECASE,
     )
-    boundaries = [(m.start(), m.group(1).strip()) for m in item_pattern.finditer(full_text)]
+    seen: dict[str, tuple[int, str]] = {}
+    for m in item_pattern.finditer(full_text):
+        title = " ".join(m.group(1).split())  # normalize internal whitespace/newlines
+        key_m = re.match(r"(item\s+\d+[a-z]?)", title, re.I)
+        key = key_m.group(1).lower() if key_m else title[:10].lower()
+        seen[key] = (m.start(), title)
+    boundaries = sorted(seen.values())
     boundaries.append((len(full_text), "END"))
 
     chunks_out = []
@@ -160,8 +169,10 @@ def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, chunk_tokens: int =
         text = text.strip()
         if not text:
             return
+        # 用 word-boundary 匹配，防止 "item 1" 误匹配 "item 1a"
         matched_section = next(
-            (v for k, v in SECTION_MAP.items() if section.lower().startswith(k)),
+            (v for k, v in SECTION_MAP.items()
+             if re.match(rf"{re.escape(k)}[\s.]", section.lower())),
             section[:60],
         )
         for idx, chunk in enumerate(chunk_text(text, enc, chunk_tokens, chunk_overlap)):
@@ -213,9 +224,21 @@ def ingest_filing(conn: psycopg.Connection, chunks: list[dict], embedder) -> int
         return 0
 
     texts = [c["content"] for c in chunks]
-    vectors = embedder.encode(texts, batch_size=32)
+    try:
+        vectors = embedder.encode(texts, batch_size=32)
+    except Exception:
+        # 整批失败时逐条重试，跳过触发内容过滤的 chunk
+        vectors = []
+        for text in texts:
+            try:
+                vectors.append(embedder.encode([text])[0])
+            except Exception as e:
+                print(f"  [SKIP] embedding failed: {str(e)[:80]}")
+                vectors.append(None)
 
-    rows = [{**c, "embedding": v} for c, v in zip(chunks, vectors)]
+    rows = [{**c, "embedding": v} for c, v in zip(chunks, vectors) if v is not None]
+    if not rows:
+        return 0
     with conn.cursor() as cur:
         cur.executemany(INSERT_SQL, rows)
     conn.commit()
@@ -257,6 +280,12 @@ def main() -> None:
     # ── 步骤 3：embed + 入库 ──
     print("\n── 步骤 3/3：Embedding + 入库 ──")
     embedder = create_embedding(cfg)
+
+    # 重新入库前清空旧数据，防止 section 字段等旧版残留
+    with psycopg.connect(cfg.db.dsn) as conn:
+        conn.execute("TRUNCATE TABLE sec_chunks")
+        conn.commit()
+    print("  [OK] sec_chunks 已清空，开始全量写入")
 
     total_chunks = 0
     with psycopg.connect(cfg.db.dsn) as conn:

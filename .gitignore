@@ -26,3 +26,13 @@ shit.py
 
 # 内部设计文档（不对外）
 MacroLens_Design.md
+
+# 评估结果（只保留基准 results_v1.csv）
+eval/results_v[2-9]*.csv
+eval/results_v1[0-9]*.csv
+eval/results_debug*.csv
+eval/results_check*.csv
+eval/results_final*.csv
+eval/results.csv
+eval/chunk_ablation.csv
+eval/comparison.png
