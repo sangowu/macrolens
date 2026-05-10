@@ -121,9 +121,11 @@ After each task, an LLM call extracts 2-4 key findings and stores them as vector
 
 | Source | Content | Size |
 |--------|---------|------|
-| SEC EDGAR | GOOGL 10-K / 10-Q / 8-K (2019–2024) | ~4,700 chunks |
+| SEC EDGAR | MAG7 10-K / 10-Q / 8-K (2019–2024) — GOOGL + MSFT + META + AMZN + AAPL + NVDA + TSLA | ~35,000 chunks |
 | FRED | 12 US macro series (GDP, CPI, FEDFUNDS, UNRATE, etc.) | ~5,000 data points |
 | Events | 30 hand-curated key events (Fed policy, earnings, antitrust) | 30 records |
+| Price History | MAG7 daily OHLCV + P/E ratios (2015–present, auto weekly refresh) | ~90,000 rows |
+| Earnings History | MAG7 quarterly EPS actual vs estimate + revenue (2015–present) | ~700 rows |
 
 ---
 
@@ -151,15 +153,16 @@ All 4 questions retrieve a relevant chunk within top-3. MRR@3 = 0.875 indicates 
 
 ### RAGAS End-to-End Evaluation
 
-Evaluated with 18 questions across three sets. Judge model: Gemini 2.5 Pro (separate from pipeline LLM).
+Evaluated with 23 questions across four sets (A/B/C/D). Judge model: Gemini 2.5 Pro (separate from pipeline LLM).
 
 | Version | faithfulness | answer_relevancy | context_precision | context_recall | ragas_score |
 |---------|-------------|-----------------|------------------|---------------|-------------|
 | v1 (baseline) | 0.618 | 1.000 | 0.174 | 0.471 | 0.566 |
 | v11 (eval methodology) | 0.544 | 0.944 | 0.603 | 0.587 | 0.670 |
-| **v12 (current)** | **0.667** | **0.972** | **0.688** | **0.651** | **0.741** |
-| v11→v12 Δ | **+0.123** | +0.028 | +0.085 | +0.064 | **+0.071** |
-| v1→v12 Δ | +0.049 | -0.028 | **+0.514** | **+0.180** | **+0.175** |
+| v12 (section fix) | 0.667 | 0.972 | 0.688 | 0.651 | 0.741 |
+| **v13 (MAG7 + price/earnings)** | **0.713** | 0.930 | 0.571 | 0.590 | **0.707** |
+| v12→v13 Δ | **+0.179** | -0.021 | -0.056 | -0.067 | +0.009 |
+| v1→v13 Δ | **+0.095** | -0.070 | **+0.397** | **+0.119** | **+0.141** |
 
 Key improvements from v1 → v11 (eval methodology):
 - `context_precision` +0.429: upgraded from holistic estimate to **Precision@K** (per-chunk boolean + rank-weighted average)
@@ -171,6 +174,11 @@ Key improvements from v1 → v11 (eval methodology):
 Key improvements from v11 → v12 (section detection fix, Bug #18):
 - `faithfulness` +0.123: retrieved chunks now contain actual MD&A / Risk Factors content instead of TOC fragments — LLM can verify its claims against real substance
 - All four metrics improved: section boundaries now correctly partition 10-K body text (MD&A 2→30, Risk Factors 0→34, Financial Statements 2→72 chunks)
+
+Key changes from v12 → v13 (MAG7 expansion + price/earnings data sources):
+- `faithfulness` +0.179: structured price/earnings data gives LLM verifiable numbers — hallucination rate drops significantly
+- `context_precision` -0.056 / `context_recall` -0.067: daily price rows (252/year) cause Precision@K mismatch with judge granularity — see Observation #19 in `docs/failure_analysis.md`; fixed in v14 via monthly aggregation
+- New Set D (5 questions) covers valuation, earnings beat/miss, macro-price correlation, and MAG7 competitor comparison
 
 ### Eval Infrastructure
 

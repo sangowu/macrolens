@@ -323,3 +323,97 @@ print(f"mean_return={monthly_ret.mean():.4f}")
         result = execute_python(code)
         assert result["error"] is None
         assert "mean_return=" in result["stdout"]
+
+
+# ── 粒度自动切换 ───────────────────────────────────────────
+
+class TestPriceHistoryGranularity:
+    """验证 _search_price_history 按日期范围自动选择日线或月度粒度。"""
+
+    def _mock_conn(self, rows):
+        conn = MagicMock()
+        conn.execute.return_value.fetchall.return_value = rows
+        return conn
+
+    def test_short_range_uses_daily_sql(self):
+        """<= 90 天 → 使用日线 SQL，结果含 pe_ratio 字段。"""
+        from agent.executor import _search_price_history, PRICE_HISTORY_SQL
+        rows = [("GOOGL", date(2024, 1, 2), 140.0, 140.0, 1_000_000, 24.5, None)]
+        conn = self._mock_conn(rows)
+
+        result = _search_price_history(conn, {
+            "tickers": ["GOOGL"],
+            "date_from": "2024-01-01",
+            "date_to": "2024-03-31",   # 90 天
+        })
+
+        sql_used = conn.execute.call_args[0][0]
+        assert sql_used is PRICE_HISTORY_SQL
+        assert result[0]["_granularity"] == "daily"
+        assert "pe_ratio" in result[0]
+
+    def test_long_range_uses_monthly_sql(self):
+        """> 90 天 → 使用月度 SQL，结果含 avg_pe 字段。"""
+        from agent.executor import _search_price_history, PRICE_HISTORY_MONTHLY_SQL
+        rows = [("GOOGL", date(2022, 1, 1), 2800.0, 2790.0, 24.1, 12)]
+        conn = self._mock_conn(rows)
+
+        result = _search_price_history(conn, {
+            "tickers": ["GOOGL"],
+            "date_from": "2022-01-01",
+            "date_to": "2022-12-31",   # 365 天
+        })
+
+        sql_used = conn.execute.call_args[0][0]
+        assert sql_used is PRICE_HISTORY_MONTHLY_SQL
+        assert result[0]["_granularity"] == "monthly"
+        assert "avg_pe" in result[0]
+        assert "trading_days" in result[0]
+
+    def test_boundary_91_days_uses_monthly(self):
+        """91 天（> 90）→ 月度 SQL。"""
+        from agent.executor import _search_price_history, PRICE_HISTORY_MONTHLY_SQL
+        conn = self._mock_conn([])
+        _search_price_history(conn, {
+            "tickers": ["GOOGL"],
+            "date_from": "2024-01-01",
+            "date_to": "2024-04-01",   # 91 天，超过阈值
+        })
+        sql_used = conn.execute.call_args[0][0]
+        assert sql_used is PRICE_HISTORY_MONTHLY_SQL
+
+    def test_monthly_format_in_synthesizer_context(self):
+        """月度行在 _format_context 输出中含 '(monthly)' 标记。"""
+        from agent.synthesizer import _format_context
+        ctx = [{
+            "source":       "price_history",
+            "ticker":       "GOOGL",
+            "date":         "2022-01-01",
+            "close":        2800.0,
+            "avg_close":    2790.0,
+            "avg_pe":       24.5,
+            "trading_days": 20,
+            "_granularity": "monthly",
+        }]
+        text = _format_context(ctx)
+        assert "(monthly)" in text
+        assert "avg_P/E=24.5" in text
+        assert "avg=$2790.00" in text
+
+    def test_daily_format_unchanged(self):
+        """日线行格式与原始格式一致（向后兼容）。"""
+        from agent.synthesizer import _format_context
+        ctx = [{
+            "source":       "price_history",
+            "ticker":       "GOOGL",
+            "date":         "2024-01-15",
+            "close":        142.5,
+            "adj_close":    142.5,
+            "volume":       1_000_000,
+            "pe_ratio":     25.3,
+            "ps_ratio":     None,
+            "_granularity": "daily",
+        }]
+        text = _format_context(ctx)
+        assert "(monthly)" not in text
+        assert "P/E=25.3" in text

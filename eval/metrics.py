@@ -98,8 +98,12 @@ def _format_context_flat(context: list[dict], max_chars: int = 10000) -> str:
         elif src == "events":
             text = f"[{i}][Event {item.get('date','')}] {item.get('title','')}: {item.get('description','')[:400]}"
         elif src == "price_history":
-            pe = f" P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
-            text = f"[{i}][Price {item.get('ticker','')} {item.get('date','')}] close={item.get('close','')}{pe}"
+            if item.get("_granularity") == "monthly":
+                pe = f" avg_P/E={item['avg_pe']:.1f}" if item.get("avg_pe") else ""
+                text = f"[{i}][Price {item.get('ticker','')} {item.get('date','')} monthly] close={item.get('close','')} avg={item.get('avg_close','')}{pe}"
+            else:
+                pe = f" P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
+                text = f"[{i}][Price {item.get('ticker','')} {item.get('date','')}] close={item.get('close','')}{pe}"
         elif src == "earnings_history":
             text = (
                 f"[{i}][Earnings {item.get('ticker','')} FY{item.get('fiscal_year','')}Q{item.get('fiscal_quarter','')}]"
@@ -125,8 +129,12 @@ def _format_context_list(context: list[dict], max_items: int = 25) -> str:
         elif src == "events":
             lines.append(f"[{i}] Event | {item.get('title','')[:100]}")
         elif src == "price_history":
-            pe = f" P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
-            lines.append(f"[{i}] Price {item.get('ticker','')} {item.get('date','')} close={item.get('close','')}{pe}")
+            if item.get("_granularity") == "monthly":
+                pe = f" avg_P/E={item['avg_pe']:.1f}" if item.get("avg_pe") else ""
+                lines.append(f"[{i}] Price {item.get('ticker','')} {item.get('date','')} (monthly) close={item.get('close','')} avg={item.get('avg_close','')}{pe}")
+            else:
+                pe = f" P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
+                lines.append(f"[{i}] Price {item.get('ticker','')} {item.get('date','')} close={item.get('close','')}{pe}")
         elif src == "earnings_history":
             lines.append(
                 f"[{i}] Earnings {item.get('ticker','')} FY{item.get('fiscal_year','')}Q{item.get('fiscal_quarter','')} "

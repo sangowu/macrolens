@@ -185,12 +185,13 @@ SET_D: list[Question] = [
         set_name="D",
         question="Is GOOGL stock expensive compared to its historical P/E ratio range from 2019 to 2024?",
         ground_truth=(
-            "GOOGL's historical P/E ratio from 2019 to 2024 has ranged roughly between 18x and 35x. "
-            "The agent should compute the current P/E percentile within this historical range and "
-            "describe whether the stock is in the upper (expensive) or lower (cheap) portion of its "
-            "historical valuation band. A forward P/E below 20x would be historically cheap; above 30x historically expensive."
+            "GOOGL's P/E ratio from 2019 to 2024 ranged approximately 18x (2022 trough) to 38x (2021 peak), "
+            "with a historical mean around 25x. A P/E above 30x places the stock in the top quartile "
+            "(historically expensive); below 20x in the bottom quartile (historically cheap). "
+            "The agent should calculate the current P/E percentile and state whether it is above or "
+            "below the historical average of approximately 25x."
         ),
-        key_facts=["P/E", "percentile", "historical", "valuation"],
+        key_facts=["P/E", "18", "38", "25", "percentile", "2022", "2021"],
     ),
     # D02 — 方向2：财报异动监控
     Question(
@@ -210,14 +211,13 @@ SET_D: list[Question] = [
         set_name="D",
         question="What was the correlation between Federal Funds Rate changes and GOOGL monthly stock returns in 2022?",
         ground_truth=(
-            "In 2022, the Federal Reserve raised rates aggressively from near-zero to over 4%. "
-            "GOOGL stock declined approximately 39% over the same period. "
-            "The correlation between monthly FEDFUNDS changes and GOOGL monthly returns in 2022 "
-            "was negative, reflecting the inverse relationship between rising interest rates and "
-            "growth stock valuations. The Pearson correlation coefficient is expected to be "
-            "in the range of -0.3 to -0.7."
+            "In 2022, the Federal Funds Rate rose from approximately 0.08% in January to 4.33% in December, "
+            "an increase of about 425 basis points. Over the same period, GOOGL stock declined approximately 39%, "
+            "from around $144 at the start of 2022 to around $88 at year end. "
+            "The monthly correlation between FEDFUNDS changes and GOOGL returns was negative, "
+            "with a Pearson coefficient approximately between -0.4 and -0.6."
         ),
-        key_facts=["correlation", "federal funds rate", "2022", "negative", "GOOGL"],
+        key_facts=["0.08", "4.33", "425", "39", "2022", "negative", "correlation"],
     ),
     # D04 — 方向3（延伸）：价格趋势分析
     Question(

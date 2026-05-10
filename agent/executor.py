@@ -269,6 +269,23 @@ WHERE ticker = ANY(%(tickers)s)
 ORDER BY ticker, date
 """
 
+# 月度聚合版本：范围 > 90 天时自动使用，将 ~252 日线压缩为 ~12 月度行
+PRICE_HISTORY_MONTHLY_SQL = """
+SELECT
+    ticker,
+    DATE_TRUNC('month', date)::date               AS month,
+    (ARRAY_AGG(close ORDER BY date DESC))[1]      AS close,
+    ROUND(AVG(close)::numeric, 2)                 AS avg_close,
+    ROUND(AVG(pe_ratio)::numeric, 2)              AS avg_pe,
+    COUNT(*)                                      AS trading_days
+FROM price_history
+WHERE ticker = ANY(%(tickers)s)
+  AND date >= %(date_from)s
+  AND date <= %(date_to)s
+GROUP BY ticker, DATE_TRUNC('month', date)
+ORDER BY ticker, month
+"""
+
 EARNINGS_HISTORY_SQL = """
 SELECT ticker, period_end, fiscal_year, fiscal_quarter, period_type,
        revenue, net_income, eps_actual, eps_estimate,
@@ -288,7 +305,13 @@ def _search_price_history(
     conn: psycopg.Connection,
     filters: dict,
 ) -> list[dict]:
-    """精确范围查询 price_history，返回日线价格和估值数据。"""
+    """
+    查询 price_history，自动按日期范围选择粒度：
+    - 范围 <= 90 天 → 日线（适合短期价格查询）
+    - 范围 > 90 天  → 月度聚合（适合趋势/相关性分析，减少噪声行数）
+    """
+    from datetime import date as _date
+
     raw_tickers = filters.get("tickers", ["GOOGL"])
     if isinstance(raw_tickers, str):
         raw_tickers = [raw_tickers]
@@ -297,24 +320,46 @@ def _search_price_history(
     date_from = filters.get("date_from", "2019-01-01")
     date_to   = filters.get("date_to", "2026-12-31")
 
-    rows = conn.execute(
-        PRICE_HISTORY_SQL,
-        {"tickers": tickers, "date_from": date_from, "date_to": date_to},
-    ).fetchall()
+    params = {"tickers": tickers, "date_from": date_from, "date_to": date_to}
 
-    return [
-        {
-            "source":    "price_history",
-            "ticker":    r[0],
-            "date":      str(r[1]),
-            "close":     float(r[2]) if r[2] is not None else None,
-            "adj_close": float(r[3]) if r[3] is not None else None,
-            "volume":    r[4],
-            "pe_ratio":  float(r[5]) if r[5] is not None else None,
-            "ps_ratio":  float(r[6]) if r[6] is not None else None,
-        }
-        for r in rows
-    ]
+    try:
+        d0 = _date.fromisoformat(date_from)
+        d1 = _date.fromisoformat(date_to)
+        use_monthly = (d1 - d0).days > 90
+    except ValueError:
+        use_monthly = False
+
+    if use_monthly:
+        rows = conn.execute(PRICE_HISTORY_MONTHLY_SQL, params).fetchall()
+        return [
+            {
+                "source":        "price_history",
+                "ticker":        r[0],
+                "date":          str(r[1]),
+                "close":         float(r[2]) if r[2] is not None else None,
+                "avg_close":     float(r[3]) if r[3] is not None else None,
+                "avg_pe":        float(r[4]) if r[4] is not None else None,
+                "trading_days":  int(r[5]) if r[5] is not None else None,
+                "_granularity":  "monthly",
+            }
+            for r in rows
+        ]
+    else:
+        rows = conn.execute(PRICE_HISTORY_SQL, params).fetchall()
+        return [
+            {
+                "source":       "price_history",
+                "ticker":       r[0],
+                "date":         str(r[1]),
+                "close":        float(r[2]) if r[2] is not None else None,
+                "adj_close":    float(r[3]) if r[3] is not None else None,
+                "volume":       r[4],
+                "pe_ratio":     float(r[5]) if r[5] is not None else None,
+                "ps_ratio":     float(r[6]) if r[6] is not None else None,
+                "_granularity": "daily",
+            }
+            for r in rows
+        ]
 
 
 def _search_earnings_history(

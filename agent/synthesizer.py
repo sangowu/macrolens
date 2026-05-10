@@ -125,8 +125,15 @@ def _format_context(context: list[dict]) -> str:
         elif src == "macro_indicators":
             parts.append(f"[{i}] {item['title']} ({item['series_id']}) | {item['date']}: {item['value']} {item.get('units', '')}")
         elif src == "price_history":
-            pe = f" | P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
-            parts.append(f"[{i}] Price {item['ticker']} {item['date']}: close=${item['close']:.2f}{pe}")
+            if item.get("_granularity") == "monthly":
+                pe = f" | avg_P/E={item['avg_pe']:.1f}" if item.get("avg_pe") else ""
+                parts.append(
+                    f"[{i}] Price {item['ticker']} {item['date']} (monthly):"
+                    f" close=${item['close']:.2f} avg=${item['avg_close']:.2f}{pe}"
+                )
+            else:
+                pe = f" | P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
+                parts.append(f"[{i}] Price {item['ticker']} {item['date']}: close=${item['close']:.2f}{pe}")
         elif src == "earnings_history":
             surprise = f" | surprise={item['eps_surprise_pct']:+.1f}%" if item.get("eps_surprise_pct") is not None else ""
             rev = f" | Rev=${item['revenue']/1e6:.1f}B" if item.get("revenue") else ""
