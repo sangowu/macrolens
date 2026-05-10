@@ -35,7 +35,7 @@ from models.factory import create_embedding, create_judge_llm_client, create_llm
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sets", nargs="+", default=["A"], choices=["A", "B", "C"])
+    parser.add_argument("--sets", nargs="+", default=["A"], choices=["A", "B", "C", "D"])
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--output", default="eval/results.csv")
@@ -111,7 +111,7 @@ def main() -> None:
 def _print_summary(path: Path) -> None:
     import statistics
     rows = list(csv.DictReader(open(path, encoding="utf-8")))
-    for set_name in ["A", "B", "C"]:
+    for set_name in ["A", "B", "C", "D"]:
         set_rows = [r for r in rows if r["set"] == set_name]
         if not set_rows:
             continue
