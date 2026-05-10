@@ -44,6 +44,19 @@ def _format_context(context: list[dict]) -> str:
             parts.append(f"[{i}][Event {item['date']} {item['category']}] {item['title']}\n{item.get('description','')[:200]}")
         elif src == "macro_indicators":
             parts.append(f"[{i}][Macro {item['series_id']} {item['date']}] {item['title']}: {item['value']} {item.get('units','')}")
+        elif src == "price_history":
+            if item.get("_granularity") == "monthly":
+                pe = f" avg_P/E={item['avg_pe']:.1f}" if item.get("avg_pe") else ""
+                parts.append(f"[{i}][Price {item['ticker']} {item['date']} monthly] close={item['close']} avg={item.get('avg_close')}{pe}")
+            else:
+                pe = f" P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
+                parts.append(f"[{i}][Price {item['ticker']} {item['date']}] close={item['close']}{pe}")
+        elif src == "earnings_history":
+            parts.append(
+                f"[{i}][Earnings {item['ticker']} FY{item.get('fiscal_year')}Q{item.get('fiscal_quarter','')}]"
+                f" EPS={item.get('eps_actual','N/A')} est={item.get('eps_estimate','N/A')}"
+                f" surprise={item.get('eps_surprise_pct','N/A')}%"
+            )
     return "\n\n".join(parts)
 
 

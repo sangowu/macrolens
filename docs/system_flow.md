@@ -144,6 +144,32 @@ WHERE mi.series_id = ANY($series)
 ORDER BY mi.date
 ```
 
+### Price History：股价 + 估值精确 SQL
+
+```sql
+SELECT date, open, high, low, close, adj_close, volume, pe_ratio, ps_ratio
+FROM price_history
+WHERE ticker = ANY($tickers)
+  AND date BETWEEN $date_from AND $date_to
+ORDER BY ticker, date
+```
+
+包含 P/E、P/S 估值比率（入库时由 yfinance 数据计算），支持跨 ticker 查询（MAG7 白名单）。
+
+### Earnings History：季度/年度财报精确 SQL
+
+```sql
+SELECT period_end, fiscal_year, fiscal_quarter, period_type,
+       revenue, net_income, eps_actual, eps_estimate, eps_surprise_pct,
+       cloud_revenue, ads_revenue, operating_margin
+FROM earnings_history
+WHERE ticker = ANY($tickers)
+  AND ($period_type IS NULL OR period_type = $period_type)
+ORDER BY ticker, period_end
+```
+
+包含 EPS 超预期指标（`eps_surprise_pct`），GOOGL 专项分部数据（cloud_revenue / ads_revenue）。
+
 所有子查询的结果合并、去重，写入 `all_context`。
 
 ---

@@ -24,6 +24,7 @@ WITH semantic AS (
     FROM sec_chunks
     WHERE embedding IS NOT NULL
       {section_filter}
+      {company_filter}
       {year_filter}
     ORDER BY embedding <=> %(vec)s::vector
     LIMIT %(candidate_k)s
@@ -36,6 +37,7 @@ lexical AS (
     FROM sec_chunks
     WHERE content_tsv @@ websearch_to_tsquery('english', %(query)s)
       {section_filter}
+      {company_filter}
       {year_filter}
     LIMIT %(candidate_k)s
 ),
@@ -141,6 +143,21 @@ ORDER BY m.series_id, m.date
 """
 
 
+_ALLOWED_COMPANIES = frozenset({"GOOGL", "MSFT", "META", "AMZN", "AAPL", "NVDA", "TSLA"})
+
+
+def _build_company_filter(filters: dict) -> str:
+    """从 filters['company'] 构建 SQL WHERE 片段，使用白名单防止注入。"""
+    raw = filters.get("company", [])
+    if isinstance(raw, str):
+        raw = [raw]
+    companies = [c for c in raw if c in _ALLOWED_COMPANIES]
+    if not companies:
+        return ""
+    quoted = ", ".join(f"'{c}'" for c in companies)
+    return f"AND company IN ({quoted})"
+
+
 def _search_sec(
     conn: psycopg.Connection,
     embedder: EmbeddingBackend,
@@ -154,7 +171,14 @@ def _search_sec(
     if "fiscal_year" in filters:
         year_filter = f"AND fiscal_year = {int(filters['fiscal_year'])}"
 
-    sql = SEC_RRF_SQL.format(section_filter="", year_filter=year_filter, rrf_k=RRF_K)
+    company_filter = _build_company_filter(filters)
+
+    sql = SEC_RRF_SQL.format(
+        section_filter="",
+        company_filter=company_filter,
+        year_filter=year_filter,
+        rrf_k=RRF_K,
+    )
     rows = conn.execute(sql, {"vec": vec, "query": query, "candidate_k": candidate_k, "top_k": top_k}).fetchall()
 
     return [
@@ -236,6 +260,151 @@ def _search_macro(
     ]
 
 
+PRICE_HISTORY_SQL = """
+SELECT ticker, date, close, adj_close, volume, pe_ratio, ps_ratio
+FROM price_history
+WHERE ticker = ANY(%(tickers)s)
+  AND date >= %(date_from)s
+  AND date <= %(date_to)s
+ORDER BY ticker, date
+"""
+
+# 月度聚合版本：范围 > 90 天时自动使用，将 ~252 日线压缩为 ~12 月度行
+PRICE_HISTORY_MONTHLY_SQL = """
+SELECT
+    ticker,
+    DATE_TRUNC('month', date)::date               AS month,
+    (ARRAY_AGG(close ORDER BY date DESC))[1]      AS close,
+    ROUND(AVG(close)::numeric, 2)                 AS avg_close,
+    ROUND(AVG(pe_ratio)::numeric, 2)              AS avg_pe,
+    COUNT(*)                                      AS trading_days
+FROM price_history
+WHERE ticker = ANY(%(tickers)s)
+  AND date >= %(date_from)s
+  AND date <= %(date_to)s
+GROUP BY ticker, DATE_TRUNC('month', date)
+ORDER BY ticker, month
+"""
+
+EARNINGS_HISTORY_SQL = """
+SELECT ticker, period_end, fiscal_year, fiscal_quarter, period_type,
+       revenue, net_income, eps_actual, eps_estimate,
+       eps_surprise, eps_surprise_pct,
+       cloud_revenue, ads_revenue,
+       gross_margin, operating_margin
+FROM earnings_history
+WHERE ticker = ANY(%(tickers)s)
+  AND period_type = %(period_type)s
+  AND fiscal_year >= %(year_from)s
+  AND fiscal_year <= %(year_to)s
+ORDER BY ticker, period_end
+"""
+
+
+def _search_price_history(
+    conn: psycopg.Connection,
+    filters: dict,
+) -> list[dict]:
+    """
+    查询 price_history，自动按日期范围选择粒度：
+    - 范围 <= 90 天 → 日线（适合短期价格查询）
+    - 范围 > 90 天  → 月度聚合（适合趋势/相关性分析，减少噪声行数）
+    """
+    from datetime import date as _date
+
+    raw_tickers = filters.get("tickers", ["GOOGL"])
+    if isinstance(raw_tickers, str):
+        raw_tickers = [raw_tickers]
+    tickers = [t for t in raw_tickers if t in _ALLOWED_COMPANIES] or ["GOOGL"]
+
+    date_from = filters.get("date_from", "2019-01-01")
+    date_to   = filters.get("date_to", "2026-12-31")
+
+    params = {"tickers": tickers, "date_from": date_from, "date_to": date_to}
+
+    try:
+        d0 = _date.fromisoformat(date_from)
+        d1 = _date.fromisoformat(date_to)
+        use_monthly = (d1 - d0).days > 90
+    except ValueError:
+        use_monthly = False
+
+    if use_monthly:
+        rows = conn.execute(PRICE_HISTORY_MONTHLY_SQL, params).fetchall()
+        return [
+            {
+                "source":        "price_history",
+                "ticker":        r[0],
+                "date":          str(r[1]),
+                "close":         float(r[2]) if r[2] is not None else None,
+                "avg_close":     float(r[3]) if r[3] is not None else None,
+                "avg_pe":        float(r[4]) if r[4] is not None else None,
+                "trading_days":  int(r[5]) if r[5] is not None else None,
+                "_granularity":  "monthly",
+            }
+            for r in rows
+        ]
+    else:
+        rows = conn.execute(PRICE_HISTORY_SQL, params).fetchall()
+        return [
+            {
+                "source":       "price_history",
+                "ticker":       r[0],
+                "date":         str(r[1]),
+                "close":        float(r[2]) if r[2] is not None else None,
+                "adj_close":    float(r[3]) if r[3] is not None else None,
+                "volume":       r[4],
+                "pe_ratio":     float(r[5]) if r[5] is not None else None,
+                "ps_ratio":     float(r[6]) if r[6] is not None else None,
+                "_granularity": "daily",
+            }
+            for r in rows
+        ]
+
+
+def _search_earnings_history(
+    conn: psycopg.Connection,
+    filters: dict,
+) -> list[dict]:
+    """精确范围查询 earnings_history，返回季度/年度财报数据。"""
+    raw_tickers = filters.get("tickers", ["GOOGL"])
+    if isinstance(raw_tickers, str):
+        raw_tickers = [raw_tickers]
+    tickers = [t for t in raw_tickers if t in _ALLOWED_COMPANIES] or ["GOOGL"]
+
+    period_type = filters.get("period_type", "quarterly")
+    year_from   = int(filters.get("year_from", 2018))
+    year_to     = int(filters.get("year_to", 2030))
+
+    rows = conn.execute(
+        EARNINGS_HISTORY_SQL,
+        {"tickers": tickers, "period_type": period_type,
+         "year_from": year_from, "year_to": year_to},
+    ).fetchall()
+
+    return [
+        {
+            "source":           "earnings_history",
+            "ticker":           r[0],
+            "period_end":       str(r[1]),
+            "fiscal_year":      r[2],
+            "fiscal_quarter":   r[3],
+            "period_type":      r[4],
+            "revenue":          float(r[5]) if r[5] is not None else None,
+            "net_income":       float(r[6]) if r[6] is not None else None,
+            "eps_actual":       float(r[7]) if r[7] is not None else None,
+            "eps_estimate":     float(r[8]) if r[8] is not None else None,
+            "eps_surprise":     float(r[9]) if r[9] is not None else None,
+            "eps_surprise_pct": float(r[10]) if r[10] is not None else None,
+            "cloud_revenue":    float(r[11]) if r[11] is not None else None,
+            "ads_revenue":      float(r[12]) if r[12] is not None else None,
+            "gross_margin":     float(r[13]) if r[13] is not None else None,
+            "operating_margin": float(r[14]) if r[14] is not None else None,
+        }
+        for r in rows
+    ]
+
+
 def execute(
     sub_queries: list[dict],
     conn: psycopg.Connection,
@@ -258,5 +427,9 @@ def execute(
                 context.extend(_search_events(conn, embedder, query, filters, cfg.candidate_k, cfg.top_k))
             elif source == "macro_indicators":
                 context.extend(_search_macro(conn, filters))
+            elif source == "price_history":
+                context.extend(_search_price_history(conn, filters))
+            elif source == "earnings_history":
+                context.extend(_search_earnings_history(conn, filters))
 
     return context

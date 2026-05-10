@@ -120,6 +120,12 @@ async def worker_loop(cfg, poll_interval: int, verbose: bool) -> None:
     print(f"[worker] Started — polling every {poll_interval}s")
 
     with psycopg.connect(cfg.db.dsn) as conn:
+        # 启动时检查数据新鲜度（只读，不触发更新）
+        try:
+            from worker.data_refresh_worker import check_and_warn_freshness
+            check_and_warn_freshness(conn)
+        except Exception:
+            pass
         while True:
             task = _pick_task(conn)
             if task:

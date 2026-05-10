@@ -121,9 +121,11 @@ After each task, an LLM call extracts 2-4 key findings and stores them as vector
 
 | Source | Content | Size |
 |--------|---------|------|
-| SEC EDGAR | GOOGL 10-K / 10-Q / 8-K (2019–2024) | ~4,700 chunks |
+| SEC EDGAR | MAG7 10-K / 10-Q / 8-K (2019–2024) — GOOGL + MSFT + META + AMZN + AAPL + NVDA + TSLA | ~35,000 chunks |
 | FRED | 12 US macro series (GDP, CPI, FEDFUNDS, UNRATE, etc.) | ~5,000 data points |
 | Events | 30 hand-curated key events (Fed policy, earnings, antitrust) | 30 records |
+| Price History | MAG7 daily OHLCV + P/E ratios (2015–present, auto weekly refresh) | ~90,000 rows |
+| Earnings History | MAG7 quarterly EPS actual vs estimate + revenue (2015–present) | ~700 rows |
 
 ---
 
@@ -151,15 +153,17 @@ All 4 questions retrieve a relevant chunk within top-3. MRR@3 = 0.875 indicates 
 
 ### RAGAS End-to-End Evaluation
 
-Evaluated with 18 questions across three sets. Judge model: Gemini 2.5 Pro (separate from pipeline LLM).
+Evaluated with 23 questions across four sets (A/B/C/D). Judge model: Gemini 2.5 Pro (separate from pipeline LLM).
 
 | Version | faithfulness | answer_relevancy | context_precision | context_recall | ragas_score |
 |---------|-------------|-----------------|------------------|---------------|-------------|
 | v1 (baseline) | 0.618 | 1.000 | 0.174 | 0.471 | 0.566 |
 | v11 (eval methodology) | 0.544 | 0.944 | 0.603 | 0.587 | 0.670 |
-| **v12 (current)** | **0.667** | **0.972** | **0.688** | **0.651** | **0.741** |
-| v11→v12 Δ | **+0.123** | +0.028 | +0.085 | +0.064 | **+0.071** |
-| v1→v12 Δ | +0.049 | -0.028 | **+0.514** | **+0.180** | **+0.175** |
+| v12 (section fix) | 0.667 | 0.972 | 0.688 | 0.651 | 0.741 |
+| v13 (MAG7 + price/earnings) | 0.713 | 0.930 | 0.571 | 0.590 | 0.707 |
+| **v14 (monthly aggregation + eval fixes)** | **0.710** | **0.952** | 0.622 | **0.490** | **0.694** |
+| v13→v14 Δ | -0.003 | **+0.022** | -0.027 | **+0.065** | **+0.024** |
+| v1→v14 Δ | **+0.092** | -0.048 | **+0.448** | **+0.019** | **+0.128** |
 
 Key improvements from v1 → v11 (eval methodology):
 - `context_precision` +0.429: upgraded from holistic estimate to **Precision@K** (per-chunk boolean + rank-weighted average)
@@ -172,18 +176,32 @@ Key improvements from v11 → v12 (section detection fix, Bug #18):
 - `faithfulness` +0.123: retrieved chunks now contain actual MD&A / Risk Factors content instead of TOC fragments — LLM can verify its claims against real substance
 - All four metrics improved: section boundaries now correctly partition 10-K body text (MD&A 2→30, Risk Factors 0→34, Financial Statements 2→72 chunks)
 
+Key changes from v12 → v13 (MAG7 expansion + price/earnings data sources):
+- `faithfulness` +0.046: structured price/earnings data gives LLM verifiable numbers — hallucination rate drops
+- `context_precision` -0.117 / `context_recall` -0.061: daily price rows (252/year) cause Precision@K mismatch — see Observation #19 in `docs/failure_analysis.md`
+- New Set D (5 questions) covers valuation, earnings beat/miss, macro-price correlation, and MAG7 competitor comparison
+
+Key improvements from v13 → v14 (monthly aggregation + eval fixes):
+- `context_recall` +0.065: ground_truth D01/D03 updated with specific numbers (P/E 18x–38x mean 25x; FEDFUNDS 0.08%→4.33%, GOOGL -39%) — Judge now has concrete facts to verify
+- `answer_relevancy` +0.022: compute tool description strengthened ("import FORBIDDEN") — LLM no longer generates broken `import numpy as np` causing compute errors
+- `context_precision` -0.027: monthly aggregation reduces row count but Judge still cautious about price rows — evaluation method ceiling, not retrieval quality
+
 ### Eval Infrastructure
 
-| Component | v1 | v11 | v12 |
-|-----------|----|----|-----|
-| Judge model | gemini-3.1-flash-lite-preview (shared with pipeline) | gemini-2.5-pro (dedicated, configurable via `judge:` in config.yaml) | same as v11 |
-| context_precision | holistic fraction estimate | Precision@K — per-chunk boolean + rank-weighted average | same as v11 |
-| context_recall | holistic score | atomic fact decomposition — each ground-truth claim checked independently | same as v11 |
-| context window for judge | 3 000 chars / 15 chunks | 10 000 chars / 25 chunks | same as v11 |
-| Pipeline used during eval | reimplemented inline (missing `already_searched`) | `per_loop.run()` directly | same as v11 |
-| answer_relevancy for refusals | penalises correct "I cannot answer" responses | 1.0 for correctly-identified unanswerable questions | same as v11 |
-| Synthesizer background knowledge | soft "do not fabricate" warning | hard Rule 5: general knowledge does not exist for this answer | same as v11 |
-| SEC chunk section accuracy | TOC-based (MD&A 2, Risk 0, FinStmt 2) | same as v1 | fixed (MD&A 30, Risk 34, FinStmt 72) |
+| Component | v1 | v11 | v12 | v13/v14 |
+|-----------|----|----|-----|---------|
+| Judge model | gemini-3.1-flash-lite-preview (shared with pipeline) | gemini-2.5-pro (dedicated, configurable via `judge:` in config.yaml) | same as v11 | same as v11 |
+| context_precision | holistic fraction estimate | Precision@K — per-chunk boolean + rank-weighted average | same as v11 | same as v11 |
+| context_recall | holistic score | atomic fact decomposition — each ground-truth claim checked independently | same as v11 | same as v11 |
+| context window for judge | 3 000 chars / 15 chunks | 10 000 chars / 25 chunks | same as v11 | same as v11 |
+| Pipeline used during eval | reimplemented inline (missing `already_searched`) | `per_loop.run()` directly | same as v11 | same as v11 |
+| answer_relevancy for refusals | penalises correct "I cannot answer" responses | 1.0 for correctly-identified unanswerable questions | same as v11 | same as v11 |
+| Synthesizer background knowledge | soft "do not fabricate" warning | hard Rule 5: general knowledge does not exist for this answer | same as v11 | same as v11 |
+| SEC chunk section accuracy | TOC-based (MD&A 2, Risk 0, FinStmt 2) | same as v1 | fixed (MD&A 30, Risk 34, FinStmt 72) | same as v12 |
+| Data sources in eval | sec_chunks, events, macro_indicators | same as v1 | same as v1 | + price_history (monthly agg), earnings_history |
+| Eval question sets | Set A (8) | + Set B (5), Set C (5) | same as v11 | + Set D (5) — valuation, earnings, correlation, MAG7 |
+| price_history granularity | — | — | — | v13: daily (252 rows/yr) → v14: monthly auto-agg (12 rows/yr) |
+| compute tool constraint | — | — | — | v14: import FORBIDDEN explicitly stated in tool description |
 
 ---
 

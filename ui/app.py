@@ -61,6 +61,14 @@ cfg = load_config("config.yaml")
 embedder = create_embedding(cfg)
 llm = create_llm_client(cfg)
 
+# 启动时检查数据新鲜度（只读，< 5ms，不触发更新）
+try:
+    with psycopg.connect(cfg.db.dsn) as _chk_conn:
+        from worker.data_refresh_worker import check_and_warn_freshness
+        check_and_warn_freshness(_chk_conn)
+except Exception:
+    pass  # DB 未就绪时静默跳过
+
 
 def _count_tokens_approx(text: str) -> int:
     return len(text) // 4
