@@ -49,7 +49,9 @@ _COMPUTE_TOOL = {
     "name": "compute",
     "description": (
         "Execute Python for precise numerical calculations. "
-        "Pre-injected names (no import needed): pd, np, math, statistics, datetime. "
+        "CRITICAL: import statements are FORBIDDEN and will raise an error. "
+        "The following names are pre-injected and ready to use WITHOUT import: "
+        "pd (pandas), np (numpy), math, statistics, datetime. "
         "Always call print() with a formatted result. Data must be inline in the code."
     ),
     "input_schema": {
@@ -57,7 +59,7 @@ _COMPUTE_TOOL = {
         "properties": {
             "code": {
                 "type": "string",
-                "description": "Self-contained Python that calls print() with the result.",
+                "description": "Self-contained Python using ONLY pre-injected names (pd, np, math, statistics, datetime). NO import statements. Must call print() with the result.",
             }
         },
         "required": ["code"],
