@@ -32,11 +32,12 @@ You have access to:
 Answer in clear, structured prose. Cite sources using [n] notation matching the context numbers.
 
 Rules:
-1. Every specific number, date, percentage, and causal claim MUST be directly supported by a cited source [n]. If you cannot point to a source, do not make the claim.
-2. If specific information is not present in the context, explicitly say: "The provided context does not contain [X]." Do NOT infer, estimate, or extrapolate beyond what is explicitly stated.
-3. If the context is insufficient for a complete answer, answer only the parts that are supported, then list what is missing.
-4. For derived metrics (growth rate, CAGR, sum, basis point change), call the compute tool with self-contained Python that prints the result. Use only numbers explicitly found in the context.
-5. Your general knowledge about world events, economics, or companies does NOT exist for the purpose of this answer. If it is not in the retrieved context, it did not happen.
+1. NUMBERS AND DATES: Every specific figure (revenue, rate, EPS, employee count, date) you state must appear verbatim in the cited source [n], or be derivable by the compute tool from numbers that appear verbatim in the context. If the exact figure is not present in the context, say "The provided context does not contain [X]." Do NOT recall figures from background knowledge.
+2. CAUSAL CLAIMS: Statements like "X caused Y", "due to X, Y occurred", "X impacted Y" require a context source that explicitly states the mechanism. Correlation in the data (e.g., rates rose AND revenue fell) does NOT establish causation. If no source explicitly states the causal link, write: "The provided context does not establish a direct causal link between X and Y."
+3. If specific information is not present in the context, explicitly say: "The provided context does not contain [X]." Do NOT infer, estimate, or extrapolate.
+4. If the context is insufficient for a complete answer, answer only the parts that are supported, then list what is missing.
+5. For derived metrics (growth rate, CAGR, sum, basis point change), call the compute tool with self-contained Python. Data must come from numbers explicitly present in the context.
+6. Your general knowledge about world events, economics, or companies does NOT exist for this answer. If it is not in the retrieved context, it did not happen.
 
 When answering valuation questions (e.g. "Is X stock expensive?"):
 - Use the compute tool to calculate P/E percentile vs historical range using np.
@@ -96,9 +97,16 @@ def _validate_citations(answer: str, context: list[dict]) -> list[str]:
 
 # ── 公开接口 ──────────────────────────────────────────────
 
-def synthesize(question: str, context: list[dict], llm: LLMClient, max_tokens: int = 4096) -> str:
+def synthesize(question: str, context: list[dict], llm: LLMClient, max_tokens: int = 4096, missing_hint: str = "") -> str:
     context_text = _format_context(context)
-    user_msg = f"Context:\n{context_text}\n\nQuestion: {question}"
+    gap_notice = (
+        f"RETRIEVAL GAP (read before answering): After exhaustive retrieval, "
+        f"the following was confirmed NOT present in the context: {missing_hint}. "
+        f"You MUST NOT state these figures or facts. "
+        f"If the question requires them, say exactly: "
+        f"\"The provided context does not contain [the missing item].\"\n\n"
+    ) if missing_hint else ""
+    user_msg = f"{gap_notice}Context:\n{context_text}\n\nQuestion: {question}"
 
     answer = llm.chat_agentic(
         system=SYSTEM_PROMPT,

@@ -60,54 +60,86 @@ def fetch_price_history(ticker: str, start: str, end: str) -> pd.DataFrame:
     return df.dropna(subset=["close"])
 
 
+def _ann_date_to_quarter_end(ann_date: date) -> date | None:
+    """将财报公告日期映射到对应的财季末日期。
+    MAG7 均按标准日历季度报告：
+      Jan-Mar 公告 → 上一年 Q4 (Dec 31)
+      Apr-Jun 公告 → 当年 Q1  (Mar 31)
+      Jul-Sep 公告 → 当年 Q2  (Jun 30)
+      Oct-Dec 公告 → 当年 Q3  (Sep 30)
+    """
+    m, y = ann_date.month, ann_date.year
+    if m <= 3:
+        return date(y - 1, 12, 31)
+    elif m <= 6:
+        return date(y, 3, 31)
+    elif m <= 9:
+        return date(y, 6, 30)
+    else:
+        return date(y, 9, 30)
+
+
 def fetch_earnings_history(ticker: str) -> pd.DataFrame:
     """
     调用 yfinance 获取季度财报历史，返回标准化 DataFrame。
-    yfinance 的 eps_estimate 历史覆盖不完整，允许 NULL。
+    EPS 来源：tk.get_earnings_dates()，覆盖 2020 年至今。
+    Revenue/Income 来源：tk.quarterly_income_stmt，覆盖最近 ~6 季度。
     """
     tk = yf.Ticker(ticker)
 
-    # 季度财报
-    quarterly = tk.quarterly_financials  # columns = period_end dates
-    quarterly_eps = tk.quarterly_earnings  # columns: Earnings, EpsEstimate (不完整)
+    # EPS（含 estimate）：yfinance 1.3+ 用 get_earnings_dates，覆盖 ~25 季度
+    earnings_dates = tk.get_earnings_dates(limit=40)
 
-    rows = []
+    # 收入/利润：quarterly_income_stmt，覆盖最近 ~6 季度
+    quarterly = tk.quarterly_income_stmt
+
+    # 用 income_stmt 列（财季末日期）建立快速查找字典
+    income_by_qend: dict[date, object] = {}
     if quarterly is not None and not quarterly.empty:
         for col in quarterly.columns:
-            period_end = col.date() if hasattr(col, "date") else col
+            qend = col.date() if hasattr(col, "date") else col
+            income_by_qend[qend] = col
+
+    # 以 earnings_dates 为主迭代，补充 income_stmt 数据
+    rows = []
+    if earnings_dates is not None and not earnings_dates.empty:
+        for ann_ts, eps_row in earnings_dates.iterrows():
+            ann_d = ann_ts.date() if hasattr(ann_ts, "date") else ann_ts
+            period_end = _ann_date_to_quarter_end(ann_d)
+            if period_end is None:
+                continue
+
             fy = period_end.year
-            fq = (period_end.month - 1) // 3 + 1
+            fq = period_end.month // 3  # 3→1, 6→2, 9→3, 12→4
 
-            def _get(label: str):
-                if label in quarterly.index:
-                    v = quarterly.loc[label, col]
-                    return float(v) / 1000 if pd.notna(v) else None  # 转换为千美元
-                return None
+            eps_actual = float(eps_row["Reported EPS"]) if pd.notna(eps_row.get("Reported EPS")) else None
+            eps_estimate = float(eps_row["EPS Estimate"]) if pd.notna(eps_row.get("EPS Estimate")) else None
+            surprise_pct_raw = eps_row.get("Surprise(%)")
+            if pd.notna(surprise_pct_raw):
+                eps_surprise_pct = float(surprise_pct_raw)
+                eps_surprise = round(eps_actual - eps_estimate, 4) if (eps_actual is not None and eps_estimate is not None) else None
+            elif eps_actual is not None and eps_estimate is not None:
+                eps_surprise = round(eps_actual - eps_estimate, 4)
+                eps_surprise_pct = round((eps_surprise / abs(eps_estimate)) * 100, 2) if eps_estimate != 0 else None
+            else:
+                eps_surprise = eps_surprise_pct = None
 
-            revenue = _get("Total Revenue")
-            net_income = _get("Net Income")
-            op_income = _get("Operating Income")
-            gross_profit = _get("Gross Profit")
-            gross_margin = (gross_profit / revenue) if (gross_profit and revenue) else None
-            op_margin = (op_income / revenue) if (op_income and revenue) else None
-
-            # EPS（尝试从 quarterly_earnings 取，失败则留 NULL）
-            eps_actual = eps_estimate = eps_surprise = eps_surprise_pct = None
-            if quarterly_eps is not None and not quarterly_eps.empty:
-                pe = period_end.strftime("%Y-%m-%d")
-                matching = [
-                    idx for idx in quarterly_eps.index
-                    if hasattr(idx, "strftime") and abs((idx.date() - period_end).days) <= 7
-                ]
-                if matching:
-                    row_eps = quarterly_eps.loc[matching[0]]
-                    if "Reported EPS" in row_eps.index:
-                        eps_actual = float(row_eps["Reported EPS"]) if pd.notna(row_eps.get("Reported EPS")) else None
-                    if "EPS Estimate" in row_eps.index:
-                        eps_estimate = float(row_eps["EPS Estimate"]) if pd.notna(row_eps.get("EPS Estimate")) else None
-                    if eps_actual is not None and eps_estimate is not None:
-                        eps_surprise = round(eps_actual - eps_estimate, 4)
-                        eps_surprise_pct = round((eps_surprise / abs(eps_estimate)) * 100, 2) if eps_estimate != 0 else None
+            # 补充 income_stmt 数据（仅最近 ~6 季度有）
+            revenue = net_income = op_income = gross_profit = None
+            gross_margin = op_margin = None
+            income_col = income_by_qend.get(period_end)
+            if income_col is not None:
+                def _get(label: str):
+                    if label in quarterly.index:
+                        v = quarterly.loc[label, income_col]
+                        return float(v) / 1000 if pd.notna(v) else None
+                    return None
+                revenue = _get("Total Revenue")
+                net_income = _get("Net Income")
+                op_income = _get("Operating Income")
+                gross_profit = _get("Gross Profit")
+                gross_margin = (gross_profit / revenue) if (gross_profit and revenue) else None
+                op_margin = (op_income / revenue) if (op_income and revenue) else None
 
             rows.append({
                 "ticker":           ticker,

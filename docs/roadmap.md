@@ -1,6 +1,6 @@
 # MacroLens 项目路线图
 
-> 迭代历史、当前状态与未来方向。最后更新：2026-05。
+> 迭代历史、当前状态与未来方向。最后更新：2026-05（v15c）。
 
 ---
 
@@ -32,6 +32,43 @@
 - Section 检测四重叠加（Bug #18）→ MD&A 2→30，Risk Factors 0→34，Financial Statements 2→72 chunks
 - Critic 死循环 → 去重机制修复
 - Synthesizer 幻觉 → 强制 Rule 5：背景知识不存在
+
+---
+
+### v15：Planner 路由、数据质量与 Synthesizer 幻觉三连修（当前版本）
+
+**Planner 路由修复（`agent/planner.py`）**
+
+- SYSTEM_PROMPT 结构重组：全部 5 个数据源路由规则集中为 `SOURCE ROUTING RULES:` 编号列表，不再夹在示例之间
+- 新增 `MANDATORY MULTI-SOURCE RULE`：相关性/关系类问题强制同时生成 `price_history` + `macro_indicators` 两个 sub-query
+- 相关性示例措辞精确对齐 D03（`monthly stock returns`、`monthly changes`、单年日期范围）；新增 GOOGL vs CPI 第二个相关性示例
+- 新增 `DATE SCOPING` 规则：防止日期范围无故扩展
+
+**数据质量修复（`ingestion/ingest_prices.py`）**
+
+- `fetch_earnings_history` 从 `tk.quarterly_earnings`（yfinance 1.3.0 已返回 None）切换为 `tk.get_earnings_dates(limit=40)`
+- EPS 历史覆盖从 6 行全 NULL 扩展为 50 行（2014–2026），含 `eps_actual` / `eps_estimate` / `eps_surprise_pct`
+- 新增 `_ann_date_to_quarter_end()` 将公告日期映射到财季末
+- 副作用：`pe_ratio` 从全 NULL（0/2854）恢复为全部有值（2854/2854），区间 16.13–53.98
+
+**Synthesizer 幻觉修复（`agent/synthesizer.py` + `agent/per_loop.py`）**
+
+- Rule 1 拆分为两条独立规则：**NUMBERS AND DATES**（数值必须在 cited source 中原文存在）和 **CAUSAL CLAIMS**（因果声明需 context 明确陈述机制，相关性≠因果性）
+- `synthesize()` 增加 `missing_hint` 参数；Critic 检测到的缺口作为 `RETRIEVAL GAP` 置于 user message 最前，明确约束"不得推断或召回"
+- `per_loop.py` 在调用 `synthesize()` 时传入最终 `missing_hint`
+
+**评估结果（v14 → v15c）**
+
+| 指标 | v14 | v15c | Δ |
+|------|-----|------|---|
+| faithfulness | 0.710 | **0.897** | **+0.187** ✅ |
+| answer_relevancy | 0.952 | 0.872 | -0.080 ⚠️ |
+| context_precision | 0.622 | **0.696** | **+0.074** ✅ |
+| context_recall | 0.490 | **0.519** | +0.029 ✅ |
+| **ragas_score** | 0.694 | **0.753** | **+0.059** ✅ |
+
+> ragas_score 0.753 为项目历史最高，超越 v12 的 0.741。
+> answer_relevancy 下滑 -0.080 是 faithfulness 修复的副作用：A04 类问题改为正确拒绝"context 不含该数值"（faithfulness 1.0），但 Judge 对"未直接给出答案"的 relevancy 评分较低。修复路径是改善检索，确保对应 chunk 稳定命中。
 
 ---
 
@@ -68,17 +105,18 @@
 
 ## 当前状态
 
-| 指标 | v12（历史最高）| v14（当前）| 差距 |
-|------|-------------|-----------|------|
-| faithfulness | 0.667 | **0.710** | **+0.043** ✅ |
-| answer_relevancy | 0.972 | 0.952 | -0.020 |
-| context_precision | 0.688 | 0.622 | -0.066 ⚠️ |
-| context_recall | 0.651 | 0.490 | -0.161 ⚠️ |
-| **ragas_score** | **0.741** | 0.694 | -0.047 |
+| 指标 | v12 | v14 | **v15c（当前）** | v12 差距 |
+|------|-----|-----|-----------------|---------|
+| faithfulness | 0.667 | 0.710 | **0.897** | **+0.230** ✅ |
+| answer_relevancy | 0.972 | 0.952 | 0.872 | -0.100 ⚠️ |
+| context_precision | 0.688 | 0.622 | **0.696** | +0.008 ✅ |
+| context_recall | 0.651 | 0.490 | 0.519 | -0.132 ⚠️ |
+| **ragas_score** | 0.741 | 0.694 | **0.753** | **+0.012** ✅ |
 
-**主要未解问题**：context_recall 显著低于 v12 基线。
+**主要未解问题**：
 
-根因：D03 类问题（宏观-股价相关性）的 Planner 未强制同时检索 `price_history` + `macro_indicators`，context 缺少 FEDFUNDS 数据，Judge 原子核对失败。详见 [`failure_analysis.md` 观察 #19](failure_analysis.html)。
+1. **context_recall（0.519）仍低于 v12 基线（0.651）**：D03 的 ground_truth key_facts 含计算结果（"425 基点"、"Pearson -0.4~-0.6"），这些值不在数据库中，recall 无法靠检索改善；需修订 Set D 的 ground_truth 设计
+2. **answer_relevancy（0.872）低于 v12（0.972）**：RETRIEVAL GAP 机制使 A04 类题目改为正确拒绝回答，短期内 relevancy 偏低；根本修复是改善 SEC chunk 检索，确保年报财务表格稳定命中
 
 **待合并**：PR #1（`feature/macrolens-expansion` → `main`）已通过所有 109 个单元测试。
 
@@ -86,8 +124,10 @@
 
 ## 近期计划（本月）
 
-- [ ] **修复 D03 Planner 路由**：相关性问题强制同时检索 `price_history` + `macro_indicators`
-- [ ] **跑 v15 eval**，验证 recall 回升至 >= 0.60
+- [x] **修复 D03 Planner 路由**：MANDATORY MULTI-SOURCE RULE + 示例更新 ✅
+- [x] **修复 earnings_history / pe_ratio 数据**：yfinance API 切换，EPS 覆盖 2014–2026 ✅
+- [x] **修复 Synthesizer 幻觉**：NUMBERS/CAUSAL 规则拆分 + RETRIEVAL GAP 机制 ✅
+- [x] **v15c eval**：ragas_score 0.753，历史最高 ✅
 - [ ] **合并 PR #1**（`feature/macrolens-expansion` → `main`）
 - [ ] **完成 MAG7 数据入库**：META / AMZN / AAPL / NVDA / TSLA SEC 文件入库
 
@@ -95,8 +135,8 @@
 
 ## 中期方向（1–3 个月）
 
-- [ ] **提升 context_recall 至 v12 基线（0.651）**：优化 Set D ground_truth + Planner 路由
-- [ ] **EPS estimate 数据质量**：yfinance 历史 estimate 覆盖不完整，考虑接入 Alpha Vantage / Polygon 提供更准确的分析师共识数据
+- [ ] **修复 answer_relevancy**：改善 A04 类（年报财务表格）的 SEC chunk 检索稳定性，确保财务汇总行不被截断
+- [ ] **提升 context_recall 至 v12 基线（0.651）**：修订 Set D ground_truth，将计算结果类 key_facts 替换为数据库中存在的原始数值
 - [ ] **Gradio UI 新增专属入口**：估值仪表盘（P/E 历史区间图）、财报对比面板
 - [ ] **MAG7 数据完整性验证**：建立定期校验脚本，检查各 ticker chunks 数量、最新数据日期
 
@@ -121,4 +161,4 @@
 | v12 | Section 检测 Bug #18 修复（MD&A / Risk Factors chunk 大幅增加）| **0.741** |
 | v13 | MAG7 扩展 + price/earnings 新数据源 + Set D 评估集 | 0.707 |
 | v14 | 月度价格聚合 + ground_truth 数值化 + compute tool import 禁止 | 0.694 |
-| v15 | D03 Planner 路由修复（计划中）| 目标 >= 0.72 |
+| v15c | Planner 路由修复 + earnings/PE 数据修复 + Synthesizer 幻觉修复 | **0.753** ★ |

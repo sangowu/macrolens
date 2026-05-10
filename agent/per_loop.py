@@ -88,7 +88,7 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
     if verbose:
         print("\n── Synthesizing ─────────────────────────────────────")
 
-    answer = synthesize(question, all_context, llm, max_tokens=cfg.llm.max_tokens)
+    answer = synthesize(question, all_context, llm, max_tokens=cfg.llm.max_tokens, missing_hint=missing_hint)
     return answer, all_context
 
 

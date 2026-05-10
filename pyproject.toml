@@ -25,6 +25,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "uvicorn>=0.46.0",
     "yfinance>=0.2.50",
+    "markdown>=3.7",
 ]
 
 [dependency-groups]
