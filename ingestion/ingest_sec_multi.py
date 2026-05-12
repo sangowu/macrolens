@@ -142,6 +142,68 @@ def chunk_text(text: str, enc: tiktoken.Encoding, chunk_tokens: int = 512, chunk
     return chunks
 
 
+_TBL = "\x02TBL\x02"
+
+
+def chunk_text_table_aware(
+    text: str,
+    enc: tiktoken.Encoding,
+    chunk_tokens: int = 512,
+    chunk_overlap: int = 128,
+) -> list[str]:
+    """表格感知分块：_TBL 标记的表格区域作为原子单元，不在表格中间切断。"""
+    parts = text.split(_TBL)
+
+    result: list[str] = []
+    buf: list[str] = []
+    buf_tok = 0
+
+    def flush(keep_overlap: bool = True) -> None:
+        nonlocal buf, buf_tok
+        if not buf:
+            return
+        result.append("".join(buf))
+        if keep_overlap:
+            overlap: list[str] = []
+            acc = 0
+            for piece in reversed(buf):
+                t = len(enc.encode(piece))
+                if acc + t > chunk_overlap:
+                    break
+                overlap.insert(0, piece)
+                acc += t
+            buf, buf_tok = overlap, acc
+        else:
+            buf, buf_tok = [], 0
+
+    for idx, part in enumerate(parts):
+        part = part.strip()
+        if not part:
+            continue
+        is_table = (idx % 2 == 1)
+        part_tok = len(enc.encode(part))
+
+        if is_table:
+            if buf_tok + part_tok > chunk_tokens and buf:
+                flush()
+            buf.append(part + "\n")
+            buf_tok += part_tok
+            if buf_tok > chunk_tokens:
+                flush(keep_overlap=False)
+        else:
+            for line in part.split("\n"):
+                line_tok = len(enc.encode(line + "\n"))
+                if buf_tok + line_tok > chunk_tokens and buf:
+                    flush()
+                buf.append(line + "\n")
+                buf_tok += line_tok
+
+    if buf:
+        result.append("".join(buf))
+
+    return [c.replace("\x00", "").replace("\x02", "") for c in result if c.strip()]
+
+
 def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, ticker: str, cik: str,
                     chunk_tokens: int = 512, chunk_overlap: int = 128) -> list[dict]:
     from bs4 import BeautifulSoup
@@ -154,6 +216,8 @@ def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, ticker: str, cik: s
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "ix:header", "ix:hidden"]):
             tag.decompose()
+        for tbl in soup.find_all("table"):
+            tbl.replace_with(_TBL + tbl.get_text(separator="\t") + _TBL)
         full_text = soup.get_text(separator="\n")
         full_text = full_text.replace("\xa0", " ")
     except Exception as e:
@@ -184,7 +248,7 @@ def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, ticker: str, cik: s
              if re.match(rf"{re.escape(k)}[\s.]", section.lower())),
             section[:60],
         )
-        for idx, chunk in enumerate(chunk_text(text, enc, chunk_tokens, chunk_overlap)):
+        for idx, chunk in enumerate(chunk_text_table_aware(text, enc, chunk_tokens, chunk_overlap)):
             chunks_out.append({
                 "content":        chunk,
                 "doc_type":       meta["doc_type"],

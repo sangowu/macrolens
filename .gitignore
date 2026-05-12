@@ -36,3 +36,6 @@ eval/results_final*.csv
 eval/results.csv
 eval/chunk_ablation.csv
 eval/comparison.png
+
+# 本地 HTML 文档（自动生成，不同步 GitHub）
+docs/html/

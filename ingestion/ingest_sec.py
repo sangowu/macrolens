@@ -128,6 +128,73 @@ def chunk_text(text: str, enc: tiktoken.Encoding, chunk_tokens: int = CHUNK_TOKE
     return chunks
 
 
+# 表格边界标记，不含 NUL，不会出现在 SEC 正文
+_TBL = "\x02TBL\x02"
+
+
+def chunk_text_table_aware(
+    text: str,
+    enc: tiktoken.Encoding,
+    chunk_tokens: int = CHUNK_TOKENS,
+    chunk_overlap: int = CHUNK_OVERLAP,
+) -> list[str]:
+    """表格感知分块：_TBL 标记的表格区域作为原子单元，不在表格中间切断。"""
+    parts = text.split(_TBL)
+    # 偶数下标 = 普通文本，奇数下标 = 表格内容
+
+    result: list[str] = []
+    buf: list[str] = []   # 当前 chunk 的文本片段
+    buf_tok = 0
+
+    def flush(keep_overlap: bool = True) -> None:
+        nonlocal buf, buf_tok
+        if not buf:
+            return
+        result.append("".join(buf))
+        if keep_overlap:
+            overlap: list[str] = []
+            acc = 0
+            for piece in reversed(buf):
+                t = len(enc.encode(piece))
+                if acc + t > chunk_overlap:
+                    break
+                overlap.insert(0, piece)
+                acc += t
+            buf, buf_tok = overlap, acc
+        else:
+            buf, buf_tok = [], 0
+
+    for idx, part in enumerate(parts):
+        part = part.strip()
+        if not part:
+            continue
+        is_table = (idx % 2 == 1)
+        part_tok = len(enc.encode(part))
+
+        if is_table:
+            # 表格整体入 buf；若放不下先 flush
+            if buf_tok + part_tok > chunk_tokens and buf:
+                flush()
+            buf.append(part + "\n")
+            buf_tok += part_tok
+            # 超大表格（>chunk_tokens）：按行切，不留 overlap
+            if buf_tok > chunk_tokens:
+                flush(keep_overlap=False)
+        else:
+            # 普通文本：逐行添加，满了就 flush
+            for line in part.split("\n"):
+                line_tok = len(enc.encode(line + "\n"))
+                if buf_tok + line_tok > chunk_tokens and buf:
+                    flush()
+                buf.append(line + "\n")
+                buf_tok += line_tok
+
+    if buf:
+        result.append("".join(buf))
+
+    return [c.replace("\x00", "").replace("\x02", "") for c in result if c.strip()]
+
+
 def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, chunk_tokens: int = CHUNK_TOKENS, chunk_overlap: int = CHUNK_OVERLAP) -> list[dict]:
     """
     BeautifulSoup 提取正文文本，regex 识别 Item 边界做 section-aware chunking。
@@ -142,6 +209,9 @@ def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, chunk_tokens: int =
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "ix:header", "ix:hidden"]):
             tag.decompose()
+        # 在转文本前标记 <table> 边界，使分块器可以识别表格原子区域
+        for tbl in soup.find_all("table"):
+            tbl.replace_with(_TBL + tbl.get_text(separator="\t") + _TBL)
         full_text = soup.get_text(separator="\n")
         full_text = full_text.replace("\xa0", " ")  # normalize non-breaking spaces
     except Exception as e:
@@ -175,7 +245,7 @@ def parse_and_chunk(html_path: Path, enc: tiktoken.Encoding, chunk_tokens: int =
              if re.match(rf"{re.escape(k)}[\s.]", section.lower())),
             section[:60],
         )
-        for idx, chunk in enumerate(chunk_text(text, enc, chunk_tokens, chunk_overlap)):
+        for idx, chunk in enumerate(chunk_text_table_aware(text, enc, chunk_tokens, chunk_overlap)):
             chunks_out.append({
                 "content": chunk,
                 "doc_type": meta["doc_type"],
