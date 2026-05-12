@@ -100,11 +100,12 @@ def _validate_citations(answer: str, context: list[dict]) -> list[str]:
 def synthesize(question: str, context: list[dict], llm: LLMClient, max_tokens: int = 4096, missing_hint: str = "") -> str:
     context_text = _format_context(context)
     gap_notice = (
-        f"RETRIEVAL GAP (read before answering): After exhaustive retrieval, "
-        f"the following was confirmed NOT present in the context: {missing_hint}. "
-        f"You MUST NOT state these figures or facts. "
-        f"If the question requires them, say exactly: "
-        f"\"The provided context does not contain [the missing item].\"\n\n"
+        f"RETRIEVAL GAP NOTE: After exhaustive retrieval, the following specific items "
+        f"were confirmed NOT present in the context: {missing_hint}. "
+        f"IMPORTANT: This does NOT mean the question is unanswerable. "
+        f"You MUST still use all available context to answer every part of the question that IS supported. "
+        f"Only for the specific missing items listed above, state: "
+        f"\"The provided context does not contain [that specific item].\"\n\n"
     ) if missing_hint else ""
     user_msg = f"{gap_notice}Context:\n{context_text}\n\nQuestion: {question}"
 
@@ -145,7 +146,7 @@ def _format_context(context: list[dict]) -> str:
                 pe = f" | P/E={item['pe_ratio']:.1f}" if item.get("pe_ratio") else ""
                 parts.append(f"[{i}] Price {item['ticker']} {item['date']}: close=${item['close']:.2f}{pe}")
         elif src == "earnings_history":
-            surprise = f" | surprise={item['eps_surprise_pct']:+.1f}%" if item.get("eps_surprise_pct") is not None else ""
+            surprise = f" | surprise={item['eps_surprise_pct']:+.2f}%" if item.get("eps_surprise_pct") is not None else ""
             rev = f" | Rev=${item['revenue']/1e6:.1f}B" if item.get("revenue") else ""
             eps_actual  = item["eps_actual"]  if item.get("eps_actual")  is not None else "N/A"
             eps_estimate = item["eps_estimate"] if item.get("eps_estimate") is not None else "N/A"

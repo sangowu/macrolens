@@ -185,13 +185,13 @@ SET_D: list[Question] = [
         set_name="D",
         question="Is GOOGL stock expensive compared to its historical P/E ratio range from 2019 to 2024?",
         ground_truth=(
-            "GOOGL's P/E ratio from 2019 to 2024 ranged approximately 18x (2022 trough) to 38x (2021 peak), "
-            "with a historical mean around 25x. A P/E above 30x places the stock in the top quartile "
-            "(historically expensive); below 20x in the bottom quartile (historically cheap). "
-            "The agent should calculate the current P/E percentile and state whether it is above or "
-            "below the historical average of approximately 25x."
+            "The context contains monthly P/E ratio data for GOOGL from 2019 to 2024 in the price_history "
+            "table (pe_ratio / avg_pe column). From this data, the historical minimum, maximum, and mean "
+            "P/E can be calculated. The P/E trough occurred around 2022, and the peak around 2020-2021. "
+            "Whether the current P/E is expensive or cheap relative to history can be assessed by computing "
+            "the percentile of the current value within the historical range."
         ),
-        key_facts=["P/E", "18", "38", "25", "percentile", "2022", "2021"],
+        key_facts=["P/E", "2022", "2021", "pe_ratio"],
     ),
     # D02 — 方向2：财报异动监控
     Question(
@@ -199,11 +199,11 @@ SET_D: list[Question] = [
         set_name="D",
         question="Did GOOGL beat or miss EPS estimates in Q3 2023, and what was the surprise percentage?",
         ground_truth=(
-            "GOOGL reported Q3 2023 EPS of approximately $1.55, beating analyst estimates of around $1.45, "
-            "representing a positive earnings surprise of approximately 6-7%. "
-            "Revenue was approximately $76.7 billion, also above consensus expectations."
+            "GOOGL reported Q3 2023 EPS actual of $1.55, beating analyst estimates of $1.45, "
+            "representing a positive earnings surprise of 7.05%. "
+            "Note: Revenue data may not be available in the earnings_history table."
         ),
-        key_facts=["Q3 2023", "EPS", "beat", "surprise", "1.55", "1.45"],
+        key_facts=["Q3 2023", "1.55", "1.45", "7.05"],
     ),
     # D03 — 方向3：宏观-股价相关性分析
     Question(
@@ -211,13 +211,15 @@ SET_D: list[Question] = [
         set_name="D",
         question="What was the correlation between Federal Funds Rate changes and GOOGL monthly stock returns in 2022?",
         ground_truth=(
-            "In 2022, the Federal Funds Rate rose from approximately 0.08% in January to 4.33% in December, "
-            "an increase of about 425 basis points. Over the same period, GOOGL stock declined approximately 39%, "
-            "from around $144 at the start of 2022 to around $88 at year end. "
-            "The monthly correlation between FEDFUNDS changes and GOOGL returns was negative, "
-            "with a Pearson coefficient approximately between -0.4 and -0.6."
+            "The context provides the necessary raw data to compute the correlation: "
+            "(1) Monthly Federal Funds Rate for 2022: starting at approximately 0.08% in January, "
+            "rising to approximately 4.33% in December (series FEDFUNDS). "
+            "(2) Monthly GOOGL closing prices for 2022. "
+            "From these two series, the monthly rate changes and monthly stock returns can be calculated, "
+            "and the Pearson correlation coefficient can be computed. "
+            "The correlation is expected to be negative (rate hikes coincided with stock price declines)."
         ),
-        key_facts=["0.08", "4.33", "425", "39", "2022", "negative", "correlation"],
+        key_facts=["0.08", "4.33", "2022", "FEDFUNDS"],
     ),
     # D04 — 方向3（延伸）：价格趋势分析
     Question(
@@ -225,26 +227,29 @@ SET_D: list[Question] = [
         set_name="D",
         question="How did GOOGL stock price perform in 2022 compared to 2021, and what was the approximate percentage change?",
         ground_truth=(
-            "GOOGL stock rose significantly in 2021, driven by strong advertising revenue recovery. "
-            "In 2022, GOOGL declined approximately 38-40% as the Federal Reserve raised interest rates "
-            "and macroeconomic conditions tightened, reducing advertiser spending and compressing "
-            "growth stock multiples."
+            "The context contains monthly GOOGL closing prices for both 2021 and 2022 from price_history. "
+            "In 2021 GOOGL prices ranged from approximately $86 (Jan) to $148 (Oct/Nov peak), "
+            "and in 2022 from approximately $144 (Jan) to $88 (Dec), "
+            "representing a decline of approximately 38-40% for 2022 vs a strong gain in 2021. "
+            "Note: The causal explanation (Fed rate hikes, advertiser spending) is not in the "
+            "price_history context and should not be asserted without SEC/events data."
         ),
-        key_facts=["2022", "2021", "decline", "38", "40", "rate"],
+        key_facts=["2022", "2021", "GOOGL"],
     ),
-    # D05 — 方向4：MAG7 竞争对手对比（需 MSFT 数据已入库）
+    # D05 — 方向4：MAG7 竞争对手对比（MSFT 数据已入库）
     Question(
         qid="D05",
         set_name="D",
         question="Compare Google Cloud and Microsoft Azure cloud revenue growth rates in fiscal year 2023. Which grew faster?",
         ground_truth=(
-            "Google Cloud revenue in FY2023 was approximately $33.1 billion, representing roughly 28% "
-            "year-over-year growth. Microsoft's Intelligent Cloud segment (including Azure) reached "
-            "approximately $87.9 billion in FY2023, with Azure growing approximately 27-28% "
-            "year-over-year. Both showed similar growth rates, though Microsoft's absolute cloud "
-            "revenue was significantly larger. Note: this question requires MSFT SEC data to be ingested."
+            "Google Cloud revenue for FY2023 was $33,088 million (approximately $33.1 billion), "
+            "representing approximately 26-28% year-over-year growth. "
+            "Microsoft's Intelligent Cloud segment for FY2023 was approximately $87.9 billion. "
+            "Both segments showed similar growth rates in 2023. "
+            "Note: Microsoft reports 'Intelligent Cloud' which includes Azure; "
+            "the MSFT 10-K may not separately break out Azure revenue."
         ),
-        key_facts=["Google Cloud", "Azure", "2023", "growth", "revenue"],
+        key_facts=["Google Cloud", "33,088", "2023", "Microsoft", "revenue"],
     ),
 ]
 

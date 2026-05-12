@@ -60,14 +60,20 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
 
         new_context = execute(sub_queries, conn, embedder, cfg.llm)
 
-        seen = {
-            (c.get("id") or c.get("event_id")
-             or c.get("ticker", "") + str(c.get("date", "")) + c.get("series_id", ""))
-            for c in all_context
-        }
+        def _dedup_key(c: dict) -> str:
+            return (
+                c.get("id") or c.get("event_id")
+                or (
+                    c.get("ticker", "")
+                    + str(c.get("period_end") or c.get("date", ""))
+                    + c.get("series_id", "")
+                    + str(c.get("fiscal_quarter", ""))
+                )
+            )
+
+        seen = {_dedup_key(c) for c in all_context}
         for c in new_context:
-            key = (c.get("id") or c.get("event_id")
-                   or c.get("ticker", "") + str(c.get("date", "")) + c.get("series_id", ""))
+            key = _dedup_key(c)
             if key not in seen:
                 all_context.append(c)
                 seen.add(key)

@@ -36,7 +36,7 @@ _JUDGE_TOOL = {
 
 def _format_context(context: list[dict]) -> str:
     parts = []
-    for i, item in enumerate(context[:20], 1):
+    for i, item in enumerate(context[:40], 1):
         src = item["source"]
         if src == "sec_chunks":
             parts.append(f"[{i}][SEC {item.get('doc_type','')} {item.get('fiscal_year','')} {item.get('section','')}]\n{item['content'][:400]}")

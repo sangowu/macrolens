@@ -36,6 +36,7 @@ from models.factory import create_embedding, create_judge_llm_client, create_llm
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sets", nargs="+", default=["A"], choices=["A", "B", "C", "D"])
+    parser.add_argument("--qids", nargs="+", default=[], help="Only run specific question IDs (e.g. B03 D02)")
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--output", default="eval/results.csv")
@@ -48,11 +49,15 @@ def main() -> None:
     print(f"Pipeline LLM : {cfg.llm.model}")
     print(f"Judge LLM    : {cfg.judge.model if cfg.judge else cfg.llm.model}")
 
-    questions = []
-    for s in args.sets:
-        questions.extend(get_set(s))
+    if args.qids:
+        from eval.questions import ALL_QUESTIONS
+        questions = [q for q in ALL_QUESTIONS if q.qid in args.qids]
+    else:
+        questions = []
+        for s in args.sets:
+            questions.extend(get_set(s))
 
-    print(f"Running evaluation on {len(questions)} questions (Sets: {args.sets})")
+    print(f"Running evaluation on {len(questions)} questions (Sets: {args.sets}, QIDs filter: {args.qids or 'none'})")
 
     fieldnames = [
         "qid", "set", "question",

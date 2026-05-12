@@ -31,6 +31,8 @@ Rate faithfulness from 0.0 to 1.0:
 - 0.5: Some claims are supported, some are not or are extrapolated
 - 0.0: Claims contradict or are absent from the context
 
+Important: Values derived by a calculation/compute tool from numbers that ARE present in the context (e.g., correlation coefficient, growth rate, CAGR computed from raw prices or revenues in context) count as supported, provided the underlying input data is present in the context.
+
 Respond with JSON only: {{"score": <float>, "reason": "<one sentence>"}}"""
 
 _RELEVANCY_PROMPT = """\
