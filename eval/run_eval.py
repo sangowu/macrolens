@@ -30,7 +30,7 @@ from agent.per_loop import run as per_loop_run
 from eval.metrics import evaluate_all
 from eval.questions import ALL_QUESTIONS, get_set
 from models.config import load_config
-from models.factory import create_embedding, create_judge_llm_client, create_llm_client
+from models.factory import create_embedding, create_judge_llm_client, create_llm_client, create_reranker
 
 
 def main() -> None:
@@ -46,6 +46,7 @@ def main() -> None:
     embedder = create_embedding(cfg)
     llm = create_llm_client(cfg)
     judge_llm = create_judge_llm_client(cfg)
+    reranker = create_reranker(cfg)
     print(f"Pipeline LLM : {cfg.llm.model}")
     print(f"Judge LLM    : {cfg.judge.model if cfg.judge else cfg.llm.model}")
 
@@ -80,7 +81,7 @@ def main() -> None:
 
                 try:
                     answer, context = per_loop_run(
-                        q.question, cfg, conn, embedder, llm, max_iter=args.max_iter
+                        q.question, cfg, conn, embedder, llm, max_iter=args.max_iter, reranker=reranker
                     )
                     latency = round(time.time() - t0, 1)
 

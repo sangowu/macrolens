@@ -8,7 +8,7 @@ from typing import Any
 import psycopg
 from pgvector.psycopg import register_vector
 
-from models.base import EmbeddingBackend
+from models.base import EmbeddingBackend, RerankerBackend
 from models.config import LLMConfig
 
 # ── RRF 常量 ──────────────────────────────────────────────
@@ -57,7 +57,7 @@ rrf AS (
 SELECT id, content, section, doc_type, period_end, fiscal_year, rrf_score
 FROM rrf
 ORDER BY rrf_score DESC
-LIMIT %(top_k)s
+LIMIT %(candidate_k)s
 """
 
 # ── Events 混合检索 ────────────────────────────────────────
@@ -99,7 +99,7 @@ rrf AS (
 SELECT event_id, date, category, entity, severity, title, description, rrf_score
 FROM rrf
 ORDER BY rrf_score DESC
-LIMIT %(top_k)s
+LIMIT %(candidate_k)s
 """
 
 # ── Macro series 关键词推断 ───────────────────────────────
@@ -165,6 +165,7 @@ def _search_sec(
     filters: dict,
     candidate_k: int,
     top_k: int,
+    reranker: RerankerBackend | None = None,
 ) -> list[dict]:
     vec = embedder.encode([query])[0]
     year_filter = ""
@@ -179,9 +180,9 @@ def _search_sec(
         year_filter=year_filter,
         rrf_k=RRF_K,
     )
-    rows = conn.execute(sql, {"vec": vec, "query": query, "candidate_k": candidate_k, "top_k": top_k}).fetchall()
+    rows = conn.execute(sql, {"vec": vec, "query": query, "candidate_k": candidate_k}).fetchall()
 
-    return [
+    items = [
         {
             "source": "sec_chunks",
             "id": r[0],
@@ -195,6 +196,12 @@ def _search_sec(
         for r in rows
     ]
 
+    if reranker and items:
+        scores = reranker.rerank(query, [item["content"] for item in items])
+        items = [item for _, item in sorted(zip(scores, items), key=lambda x: x[0], reverse=True)]
+
+    return items[:top_k]
+
 
 def _search_events(
     conn: psycopg.Connection,
@@ -203,6 +210,7 @@ def _search_events(
     filters: dict,
     candidate_k: int,
     top_k: int,
+    reranker: RerankerBackend | None = None,
 ) -> list[dict]:
     vec = embedder.encode([query])[0]
     category_filter = ""
@@ -210,9 +218,9 @@ def _search_events(
         category_filter = f"AND category = '{filters['category']}'"
 
     sql = EVENTS_RRF_SQL.format(category_filter=category_filter, rrf_k=RRF_K)
-    rows = conn.execute(sql, {"vec": vec, "query": query, "candidate_k": candidate_k, "top_k": top_k}).fetchall()
+    rows = conn.execute(sql, {"vec": vec, "query": query, "candidate_k": candidate_k}).fetchall()
 
-    return [
+    items = [
         {
             "source": "events",
             "event_id": r[0],
@@ -226,6 +234,13 @@ def _search_events(
         }
         for r in rows
     ]
+
+    if reranker and items:
+        docs = [f"{item['title']} {item.get('description', '')}" for item in items]
+        scores = reranker.rerank(query, docs)
+        items = [item for _, item in sorted(zip(scores, items), key=lambda x: x[0], reverse=True)]
+
+    return items[:top_k]
 
 
 def _search_macro(
@@ -410,6 +425,7 @@ def execute(
     conn: psycopg.Connection,
     embedder: EmbeddingBackend,
     cfg: LLMConfig,
+    reranker: RerankerBackend | None = None,
 ) -> list[dict[str, Any]]:
     """执行所有子查询，返回合并后的 context 列表。"""
     register_vector(conn)
@@ -422,9 +438,9 @@ def execute(
 
         for source in sources:
             if source == "sec_chunks":
-                context.extend(_search_sec(conn, embedder, query, filters, cfg.candidate_k, cfg.top_k))
+                context.extend(_search_sec(conn, embedder, query, filters, cfg.candidate_k, cfg.top_k, reranker))
             elif source == "events":
-                context.extend(_search_events(conn, embedder, query, filters, cfg.candidate_k, cfg.top_k))
+                context.extend(_search_events(conn, embedder, query, filters, cfg.candidate_k, cfg.top_k, reranker))
             elif source == "macro_indicators":
                 context.extend(_search_macro(conn, filters))
             elif source == "price_history":

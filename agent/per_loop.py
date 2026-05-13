@@ -25,11 +25,12 @@ from agent.critic import critique
 from agent.executor import execute
 from agent.planner import plan
 from agent.synthesizer import synthesize
+from models.base import RerankerBackend
 from models.config import load_config
-from models.factory import create_embedding, create_llm_client
+from models.factory import create_embedding, create_llm_client, create_reranker
 
 
-def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: int = 3, verbose: bool = False) -> str:
+def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: int = 3, verbose: bool = False, reranker: RerankerBackend | None = None) -> str:
     all_context: list[dict] = []
     history: list[dict] = []
     missing_hint = ""
@@ -58,7 +59,7 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
 
         searched_queries.extend(sq["query"] for sq in sub_queries)
 
-        new_context = execute(sub_queries, conn, embedder, cfg.llm)
+        new_context = execute(sub_queries, conn, embedder, cfg.llm, reranker=reranker)
 
         def _dedup_key(c: dict) -> str:
             return (
@@ -118,9 +119,10 @@ def main() -> None:
 
     embedder = create_embedding(cfg)
     llm = create_llm_client(cfg)
+    reranker = create_reranker(cfg)
 
     with psycopg.connect(cfg.db.dsn) as conn:
-        answer, _ = run(question, cfg, conn, embedder, llm, max_iter=args.max_iter, verbose=args.verbose)
+        answer, _ = run(question, cfg, conn, embedder, llm, max_iter=args.max_iter, verbose=args.verbose, reranker=reranker)
 
     print("\n" + "=" * 60)
     print(answer)

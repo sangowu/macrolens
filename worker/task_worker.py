@@ -26,7 +26,7 @@ from agent.memory import extract_and_store, retrieve
 from agent.per_loop import run as per_loop_run
 from agent.report_writer import write_report
 from models.config import load_config
-from models.factory import create_embedding, create_llm_client
+from models.factory import create_embedding, create_llm_client, create_reranker
 
 
 def _pick_task(conn: psycopg.Connection) -> dict | None:
@@ -70,7 +70,7 @@ def _fail_task(conn: psycopg.Connection, task_id: str, error_msg: str) -> None:
     conn.commit()
 
 
-def _run_task(task: dict, cfg, conn: psycopg.Connection, embedder, llm, verbose: bool) -> None:
+def _run_task(task: dict, cfg, conn: psycopg.Connection, embedder, llm, verbose: bool, reranker=None) -> None:
     task_id = task["id"]
     question = task["question"]
 
@@ -94,6 +94,7 @@ def _run_task(task: dict, cfg, conn: psycopg.Connection, embedder, llm, verbose:
         enriched_question, cfg, conn, embedder, llm,
         max_iter=cfg.llm.max_iter if hasattr(cfg.llm, "max_iter") else 3,
         verbose=verbose,
+        reranker=reranker,
     )
     elapsed = time.perf_counter() - t0
 
@@ -116,6 +117,7 @@ def _run_task(task: dict, cfg, conn: psycopg.Connection, embedder, llm, verbose:
 async def worker_loop(cfg, poll_interval: int, verbose: bool) -> None:
     embedder = create_embedding(cfg)
     llm = create_llm_client(cfg)
+    reranker = create_reranker(cfg)
 
     print(f"[worker] Started — polling every {poll_interval}s")
 
@@ -130,7 +132,7 @@ async def worker_loop(cfg, poll_interval: int, verbose: bool) -> None:
             task = _pick_task(conn)
             if task:
                 try:
-                    _run_task(task, cfg, conn, embedder, llm, verbose)
+                    _run_task(task, cfg, conn, embedder, llm, verbose, reranker=reranker)
                 except Exception as exc:
                     _fail_task(conn, task["id"], str(exc))
                     print(f"[worker] ERROR task {task['id']}: {exc}", file=sys.stderr)
