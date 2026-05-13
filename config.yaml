@@ -23,7 +23,7 @@ embedding:
     base_url: https://ms-ens-45cccd31-f770.api-inference.modelscope.cn/v1
 
 reranker:
-  backend: online            # local | remote | online
+  backend: remote            # local | remote | online
 
   local:
     model_id: BAAI/bge-reranker-v2-m3

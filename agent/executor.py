@@ -197,8 +197,12 @@ def _search_sec(
     ]
 
     if reranker and items:
-        scores = reranker.rerank(query, [item["content"] for item in items])
-        items = [item for _, item in sorted(zip(scores, items), key=lambda x: x[0], reverse=True)]
+        try:
+            scores = reranker.rerank(query, [item["content"] for item in items])
+            items = [item for _, item in sorted(zip(scores, items), key=lambda x: x[0], reverse=True)]
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Reranker failed, using RRF order: %s", e)
 
     return items[:top_k]
 
@@ -236,9 +240,13 @@ def _search_events(
     ]
 
     if reranker and items:
-        docs = [f"{item['title']} {item.get('description', '')}" for item in items]
-        scores = reranker.rerank(query, docs)
-        items = [item for _, item in sorted(zip(scores, items), key=lambda x: x[0], reverse=True)]
+        try:
+            docs = [f"{item['title']} {item.get('description', '')}" for item in items]
+            scores = reranker.rerank(query, docs)
+            items = [item for _, item in sorted(zip(scores, items), key=lambda x: x[0], reverse=True)]
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Reranker failed, using RRF order: %s", e)
 
     return items[:top_k]
 
