@@ -69,9 +69,18 @@ Plan  →  Execute  →  Critique  →  (最多 3 轮)  →  Synthesize
 
 `agent/executor.py` 按子查询的 `sources` 字段路由：
 
-- **`sec_chunks`** — pgvector 语义 + tsvector 全文 → RRF 融合
-- **`events`** — 同上，但查 events 表
+- **`sec_chunks`** — pgvector 语义 + tsvector 全文 → RRF 融合 → **Reranker 精排**（取 candidate_k 候选，cross-encoder 重排后截 top_k）
+- **`events`** — 同上（同样经过 Reranker）
 - **`macro_indicators`** — 精确 SQL，按 series_id + 日期范围。Planner 漏填 series 时，`_infer_series()` 从查询文本关键词自动推断
+
+### Reranker
+
+`models/reranker/` 提供三种后端（`local` / `remote` / `online`）。当前配置：`remote`，指向本地 Docker 容器（`cloud_server/`）运行的 BGE-reranker-v2-m3 服务（端口 6006）。Reranker 调用失败时自动 fallback 到 RRF 排序，不影响主流程。
+
+启动服务：
+```bash
+docker run --gpus all -p 6006:8000 macrolens-model-server
+```
 
 ### 配置
 

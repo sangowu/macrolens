@@ -1,6 +1,6 @@
 # MacroLens 项目路线图
 
-> 迭代历史、当前状态与未来方向。最后更新：2026-05（v15c）。
+> 迭代历史、当前状态与未来方向。最后更新：2026-05（v19）。
 
 ---
 
@@ -105,20 +105,27 @@
 
 ## 当前状态
 
-| 指标 | v12 | v14 | **v15c（当前）** | v12 差距 |
-|------|-----|-----|-----------------|---------|
-| faithfulness | 0.667 | 0.710 | **0.897** | **+0.230** ✅ |
-| answer_relevancy | 0.972 | 0.952 | 0.872 | -0.100 ⚠️ |
-| context_precision | 0.688 | 0.622 | **0.696** | +0.008 ✅ |
-| context_recall | 0.651 | 0.490 | 0.519 | -0.132 ⚠️ |
-| **ragas_score** | 0.741 | 0.694 | **0.753** | **+0.012** ✅ |
+| 指标 | v12 | v15c | **v19（当前）** | 较 v15c |
+|------|-----|------|----------------|---------|
+| faithfulness | 0.667 | 0.891 | 0.739 | -0.152 ⚠️ |
+| answer_relevancy | 0.972 | 0.870 | **0.955** | **+0.085** ✅ |
+| context_precision | 0.688 | 0.691 | 0.600 | -0.091 ⚠️ |
+| context_recall | 0.651 | 0.512 | 0.506 | -0.006 → |
+| **ragas_score** | 0.741 | **0.753** | 0.699 | -0.054 ⚠️ |
+
+**v16–v19 主要变更**：
+
+- **Set D ground_truth 修订**：key_facts 改为 DB 原始值（v17b），D01/D03/D04 context_recall 大幅提升
+- **earnings_history 去重修复**：per_loop.py dedup key 加入 period_end + fiscal_quarter（v17b），D02 recall 0→1.0
+- **EPS 精度修复**：synthesizer.py eps_surprise_pct 格式 +.1f → +.2f（v17e），D02 faithfulness 0.5→1.0
+- **Reranker 接入**（v18-v19）：BGE-reranker-v2-m3 通过 Docker 容器（`cloud_server/`）提供服务，Executor 取 candidate_k 候选后 cross-encoder 精排
+- **RETRIEVAL GAP 禁用**（v19）：Critic 40-item 窗口在大 context（100+ 条）下误报数据缺失，导致 Synthesizer 错误否认已存在的数据；移除 missing_hint 注入后 D01/B05 faithfulness 恢复
 
 **主要未解问题**：
 
-1. **context_recall（0.519）仍低于 v12 基线（0.651）**：D03 的 ground_truth key_facts 含计算结果（"425 基点"、"Pearson -0.4~-0.6"），这些值不在数据库中，recall 无法靠检索改善；需修订 Set D 的 ground_truth 设计
-2. **answer_relevancy（0.872）低于 v12（0.972）**：RETRIEVAL GAP 机制使 A04 类题目改为正确拒绝回答，短期内 relevancy 偏低；根本修复是改善 SEC chunk 检索，确保年报财务表格稳定命中
-
-**待合并**：PR #1（`feature/macrolens-expansion` → `main`）已通过所有 109 个单元测试。
+1. **faithfulness 波动大（0.739 ± 0.15）**：A01（年度广告收入总额不在 top-k）、B03（2022 年 SEC 文件不含 ChatGPT/OpenAI 名称）为数据天花板，非检索问题
+2. **reranker 收益未达预期**：对精准事实查询有效（A04 precision 0→1.0），对多跳/comparative 查询因减少 context 多样性而轻微退步
+3. **context_recall 天花板**：核心数据均在 DB，但 RRF → reranker 排序变化影响部分问题的 recall 稳定性
 
 ---
 
@@ -126,10 +133,13 @@
 
 - [x] **修复 D03 Planner 路由**：MANDATORY MULTI-SOURCE RULE + 示例更新 ✅
 - [x] **修复 earnings_history / pe_ratio 数据**：yfinance API 切换，EPS 覆盖 2014–2026 ✅
-- [x] **修复 Synthesizer 幻觉**：NUMBERS/CAUSAL 规则拆分 + RETRIEVAL GAP 机制 ✅
+- [x] **修复 Synthesizer 幻觉**：NUMBERS/CAUSAL 规则拆分 ✅
 - [x] **v15c eval**：ragas_score 0.753，历史最高 ✅
-- [ ] **合并 PR #1**（`feature/macrolens-expansion` → `main`）
-- [ ] **完成 MAG7 数据入库**：META / AMZN / AAPL / NVDA / TSLA SEC 文件入库
+- [x] **Set D ground_truth 修订**：key_facts 改为 DB 原始值，D01/D03/D04 recall 大幅提升 ✅
+- [x] **earnings dedup 修复**：per_loop.py period_end 去重，D02 recall 0→1.0 ✅
+- [x] **Reranker 接入**：BGE-reranker-v2-m3 Docker 服务，Executor cross-encoder 精排 ✅
+- [ ] **提升 faithfulness 稳定性**：A01/B03 数据天花板，需补充数据源或调整评估集
+- [ ] **Gradio UI 新增专属入口**：估值仪表盘（P/E 历史区间图）、财报对比面板
 
 ---
 
@@ -162,3 +172,5 @@
 | v13 | MAG7 扩展 + price/earnings 新数据源 + Set D 评估集 | 0.707 |
 | v14 | 月度价格聚合 + ground_truth 数值化 + compute tool import 禁止 | 0.694 |
 | v15c | Planner 路由修复 + earnings/PE 数据修复 + Synthesizer 幻觉修复 | **0.753** ★ |
+| v17b | Set D ground_truth 修订 + earnings dedup 修复 + EPS 精度修复 | 0.747 |
+| v19 | Reranker 接入（Docker BGE-reranker-v2-m3）+ RETRIEVAL GAP 禁用 | 0.699 |
