@@ -95,10 +95,7 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
     if verbose:
         print("\n── Synthesizing ─────────────────────────────────────")
 
-    # Don't pass missing_hint: reranker provides high-quality context, and Critic's
-    # limited window (40 items) causes false "missing" reports on large contexts,
-    # which cause Synthesizer to incorrectly deny data that exists in context.
-    answer = synthesize(question, all_context, llm, max_tokens=cfg.llm.max_tokens)
+    answer = synthesize(question, all_context, llm, max_tokens=cfg.llm.max_tokens, missing_hint=missing_hint)
     return answer, all_context
 
 
