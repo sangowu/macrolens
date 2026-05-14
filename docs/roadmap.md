@@ -1,6 +1,6 @@
 # MacroLens 项目路线图
 
-> 迭代历史、当前状态与未来方向。最后更新：2026-05（v19）。
+> 迭代历史、当前状态与未来方向。最后更新：2026-05（v21）。
 
 ---
 
@@ -103,29 +103,30 @@
 
 ---
 
-## 当前状态
+## 当前状态（v21）
 
-| 指标 | v12 | v15c | **v19（当前）** | 较 v15c |
+| 指标 | v12 | v15c | **v21（当前）** | 较 v15c |
 |------|-----|------|----------------|---------|
-| faithfulness | 0.667 | 0.891 | 0.739 | -0.152 ⚠️ |
-| answer_relevancy | 0.972 | 0.870 | **0.955** | **+0.085** ✅ |
-| context_precision | 0.688 | 0.691 | 0.600 | -0.091 ⚠️ |
-| context_recall | 0.651 | 0.512 | 0.506 | -0.006 → |
-| **ragas_score** | 0.741 | **0.753** | 0.699 | -0.054 ⚠️ |
+| faithfulness | 0.667 | 0.891 | 0.717 | -0.174 ⚠️ |
+| answer_relevancy | 0.972 | 0.870 | **0.957** | **+0.087** ✅ |
+| context_precision | 0.688 | 0.691 | 0.667 | -0.024 → |
+| context_recall | 0.651 | 0.512 | **0.549** | **+0.037** ✅ |
+| **ragas_score** | 0.741 | **0.753** | 0.725 | -0.028 → |
 
-**v16–v19 主要变更**：
+**v16–v21 主要变更（性能优化阶段）**：
 
-- **Set D ground_truth 修订**：key_facts 改为 DB 原始值（v17b），D01/D03/D04 context_recall 大幅提升
-- **earnings_history 去重修复**：per_loop.py dedup key 加入 period_end + fiscal_quarter（v17b），D02 recall 0→1.0
-- **EPS 精度修复**：synthesizer.py eps_surprise_pct 格式 +.1f → +.2f（v17e），D02 faithfulness 0.5→1.0
-- **Reranker 接入**（v18-v19）：BGE-reranker-v2-m3 通过 Docker 容器（`cloud_server/`）提供服务，Executor 取 candidate_k 候选后 cross-encoder 精排
-- **RETRIEVAL GAP 禁用**（v19）：Critic 40-item 窗口在大 context（100+ 条）下误报数据缺失，导致 Synthesizer 错误否认已存在的数据；移除 missing_hint 注入后 D01/B05 faithfulness 恢复
+- **Set D ground_truth 修订**（v17b）：key_facts 改为 DB 原始值，D01/D03/D04 context_recall 大幅提升
+- **earnings_history 去重修复**（v17b）：per_loop.py dedup key 加入 period_end + fiscal_quarter，D02 recall 0→1.0
+- **EPS 精度修复**（v17e）：synthesizer.py eps_surprise_pct 格式 +.1f → +.2f，D02 faithfulness 0.5→1.0
+- **Reranker 接入**（v18+）：BGE-reranker-v2-m3 通过 Docker 容器（`cloud_server/`）提供服务；candidate_k=50 候选后 cross-encoder 精排至 top_k=12；API 失败自动 fallback 到 RRF
+- **Critic 智能窗口**（v21）：结构化数据（macro/price/earnings）全量展示，sec_chunks/events 截前 40 条，消除大 context 下的误报缺失问题
+- **RETRIEVAL GAP 修复**（v21）：Critic 窗口扩大后重新启用 missing_hint 注入，faithfulness 0.687 → 0.717
 
-**主要未解问题**：
+**剩余天花板（非检索可解决）**：
 
-1. **faithfulness 波动大（0.739 ± 0.15）**：A01（年度广告收入总额不在 top-k）、B03（2022 年 SEC 文件不含 ChatGPT/OpenAI 名称）为数据天花板，非检索问题
-2. **reranker 收益未达预期**：对精准事实查询有效（A04 precision 0→1.0），对多跳/comparative 查询因减少 context 多样性而轻微退步
-3. **context_recall 天花板**：核心数据均在 DB，但 RRF → reranker 排序变化影响部分问题的 recall 稳定性
+1. **A01/A04 faithfulness 不稳定**：年度广告收入总额和 Google Cloud 年收入总额在 SEC 10-K 财务表格中，但 RRF+reranker 排名不稳定，Synthesizer 偶尔从背景知识补填
+2. **B03 数据缺口**：2022 年 SEC filing 写成时 ChatGPT/OpenAI 尚未广为人知，events 表亦无相关词条
+3. **RAGAS faithfulness 指标特性**：单题单个幻觉声明即扣 0.5 分，评估噪声约 ±0.03
 
 ---
 
@@ -137,9 +138,16 @@
 - [x] **v15c eval**：ragas_score 0.753，历史最高 ✅
 - [x] **Set D ground_truth 修订**：key_facts 改为 DB 原始值，D01/D03/D04 recall 大幅提升 ✅
 - [x] **earnings dedup 修复**：per_loop.py period_end 去重，D02 recall 0→1.0 ✅
-- [x] **Reranker 接入**：BGE-reranker-v2-m3 Docker 服务，Executor cross-encoder 精排 ✅
-- [ ] **提升 faithfulness 稳定性**：A01/B03 数据天花板，需补充数据源或调整评估集
+- [x] **Reranker 接入**：BGE-reranker-v2-m3 Docker 服务，candidate_k=50，cross-encoder 精排 ✅
+- [x] **Critic 智能窗口**：结构化数据全量，sec_chunks 截 40，消除大 context 误报 ✅
+- [x] **性能优化阶段结束**：v21 ragas_score=0.725（较 v15c -0.028，recall +0.037）✅
+
+---
+
+## 下一阶段：功能扩展
+
 - [ ] **Gradio UI 新增专属入口**：估值仪表盘（P/E 历史区间图）、财报对比面板
+- [ ] **MAG7 数据完整性**：完成 META / AMZN / AAPL / NVDA / TSLA SEC 文件入库
 
 ---
 
@@ -173,4 +181,6 @@
 | v14 | 月度价格聚合 + ground_truth 数值化 + compute tool import 禁止 | 0.694 |
 | v15c | Planner 路由修复 + earnings/PE 数据修复 + Synthesizer 幻觉修复 | **0.753** ★ |
 | v17b | Set D ground_truth 修订 + earnings dedup 修复 + EPS 精度修复 | 0.747 |
-| v19 | Reranker 接入（Docker BGE-reranker-v2-m3）+ RETRIEVAL GAP 禁用 | 0.699 |
+| v19 | Reranker 接入（Docker BGE-reranker-v2-m3），candidate_k=20 | 0.699 |
+| v20 | candidate_k 20→50，reranker 候选池扩大 | 0.711 |
+| v21 | Critic 智能窗口 + RETRIEVAL GAP 恢复，性能优化阶段终版 | 0.725 |
