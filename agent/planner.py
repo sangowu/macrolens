@@ -26,6 +26,19 @@ Available event categories: fed_policy, company_action, macro_shock, industry
 
 Decompose the user question into 1-4 sub-queries using the create_query_plan tool.
 
+SCOPE GATING (evaluate this FIRST):
+Before decomposing, decide whether the question belongs to MacroLens's domain:
+MAG7 companies (GOOGL, MSFT, META, AMZN, AAPL, NVDA, TSLA), US macroeconomics, SEC filings, stock prices, and earnings.
+- If the question is ENTIRELY outside this domain (e.g. weather, cooking, general coding help,
+  unrelated private companies, casual chitchat), set in_scope=false, write a one-sentence
+  reject_reason for the user, and return an EMPTY sub_queries list.
+- Otherwise set in_scope=true and decompose as usual.
+- IMPORTANT: a question is still IN scope even when the data may be unavailable. Future or
+  speculative questions ("stock price in 2030", "if the Fed cuts rates to zero"), tickers that
+  may not be ingested yet, and cross-source comparisons are ALL in scope — downstream retrieval
+  and synthesis handle missing data. Reject ONLY questions that have nothing to do with MAG7
+  companies or US macroeconomics.
+
 SOURCE ROUTING RULES:
 1. Use "macro_indicators" for questions about economic data series: interest rates, GDP, CPI, unemployment, Fed funds rate, inflation, retail sales, oil prices, yield curve, etc.
    - Always include "series" (list of series IDs) and optionally "date_from"/"date_to" (YYYY-MM-DD).
@@ -85,10 +98,23 @@ _PLAN_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
+            "in_scope": {
+                "type": "boolean",
+                "description": (
+                    "False ONLY if the question is entirely outside MacroLens's domain "
+                    "(MAG7 companies + US macroeconomics + SEC filings + stock/earnings data). "
+                    "A question is IN scope even if its answer may be unavailable "
+                    "(future/speculative questions, un-ingested tickers, cross-source comparisons)."
+                ),
+            },
+            "reject_reason": {
+                "type": "string",
+                "description": "One sentence explaining the out-of-scope rejection for the user. Empty string when in_scope is true.",
+            },
             "sub_queries": {
                 "type": "array",
-                "description": "List of 1-4 sub-queries to retrieve relevant evidence.",
-                "minItems": 1,
+                "description": "List of 0-4 sub-queries to retrieve relevant evidence. Empty when in_scope is false.",
+                "minItems": 0,
                 "maxItems": 4,
                 "items": {
                     "type": "object",
@@ -164,13 +190,20 @@ _PLAN_TOOL = {
                 },
             }
         },
-        "required": ["sub_queries"],
+        "required": ["in_scope", "sub_queries"],
     },
 }
 
 
-def plan(question: str, llm: LLMClient, history: list[dict] | None = None) -> list[dict]:
-    """将 question 拆解为子查询列表。history 用于多轮精化。"""
+def plan_scoped(
+    question: str, llm: LLMClient, history: list[dict] | None = None
+) -> tuple[bool, str, list[dict]]:
+    """将 question 拆解为子查询，并附带域内判断。
+
+    返回 (in_scope, reject_reason, sub_queries)：
+    - in_scope=False 时 sub_queries 为空，reject_reason 是给用户的一句话拒答理由。
+    - LLM 未返回 in_scope 字段时默认 True（向后兼容旧 mock / 测试）。
+    """
     messages: list[dict] = []
     if history:
         messages.extend(history)
@@ -185,7 +218,20 @@ def plan(question: str, llm: LLMClient, history: list[dict] | None = None) -> li
         temperature=0.0,
     )
 
+    in_scope = result.get("in_scope", True)
+    reject_reason = result.get("reject_reason", "")
     sub_queries = result.get("sub_queries", [])
+
+    if not in_scope:
+        logger.info("[PLAN] out-of-scope, rejecting | reason=%s", reject_reason)
+        return False, reject_reason, []
+
     for sq in sub_queries:
         logger.info("[PLAN] sources=%s filters=%s | %s", sq.get("sources"), sq.get("filters"), sq.get("query", "")[:80])
+    return True, "", sub_queries
+
+
+def plan(question: str, llm: LLMClient, history: list[dict] | None = None) -> list[dict]:
+    """向后兼容入口：只返回子查询列表，忽略域内判断。"""
+    _, _, sub_queries = plan_scoped(question, llm, history=history)
     return sub_queries

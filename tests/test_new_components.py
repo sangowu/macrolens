@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.synthesizer import _validate_citations, _format_context, _compute_executor
-from agent.planner import plan
+from agent.planner import plan, plan_scoped
 
 
 # ── Mock LLM ──────────────────────────────────────────────
@@ -58,6 +58,49 @@ class TestPlanner:
         llm = MockLLM(tool_responses={"create_query_plan": {}})
         result = plan("Any question", llm)
         assert result == []
+
+    def test_scoped_defaults_to_in_scope_when_field_absent(self):
+        # 旧 mock 不返回 in_scope，应默认视为域内，向后兼容 plan()。
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {"sub_queries": [{"query": "x", "sources": ["sec_chunks"]}]}
+        })
+        in_scope, reason, subs = plan_scoped("Google revenue 2023?", llm)
+        assert in_scope is True
+        assert reason == ""
+        assert len(subs) == 1
+
+    def test_scoped_rejects_out_of_domain_question(self):
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {
+                "in_scope": False,
+                "reject_reason": "This question is unrelated to MAG7 companies or US macroeconomics.",
+                "sub_queries": [],
+            }
+        })
+        in_scope, reason, subs = plan_scoped("What's the weather in Dublin today?", llm)
+        assert in_scope is False
+        assert "MAG7" in reason
+        assert subs == []
+
+    def test_speculative_question_stays_in_scope(self):
+        # 未来/推测型问题仍属域内，由下游合成处理数据缺失，不应被前置拒答。
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {
+                "in_scope": True,
+                "reject_reason": "",
+                "sub_queries": [{"query": "GOOGL price history", "sources": ["price_history"]}],
+            }
+        })
+        in_scope, _, subs = plan_scoped("What was Google's revenue in 2030?", llm)
+        assert in_scope is True
+        assert len(subs) == 1
+
+    def test_plan_delegates_and_drops_scope(self):
+        # plan() 是向后兼容入口，越界时返回空列表。
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {"in_scope": False, "reject_reason": "out", "sub_queries": []}
+        })
+        assert plan("unrelated", llm) == []
 
     def test_passes_history_in_second_round(self):
         captured = {}

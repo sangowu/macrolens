@@ -3,19 +3,61 @@
 
 Set A: 事实型（有明确数值/日期答案）
 Set B: 多跳推理（需要跨数据源）
-Set C: 边界/对抗（超范围、模糊、比较）
+Set C: 边界/对抗（超范围、模糊、比较）—— 域内但数据缺失/推测，管道内拒答
+Set D: 方向覆盖（价格 / 财报异动 / 宏观-股价 / MAG7 对比）—— 手写 GT
+Set E: 自动生成（真值表程序化出题 + 可判分数值 GT）—— 见 eval/generators/
+Set F: 域外拒答（完全不属于金融领域，应被 Planner in_scope 前置拦截）
+
+Set A-D 的 ground_truth 是手写散文，只被 context_recall 消费。
+Set E 额外带 `expected`（数值 GT + tolerance）和 `source`（溯源），
+可被 metrics.answer_correctness 自动判分。
 """
 from __future__ import annotations
+
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
+
+DATASET_DIR = Path(__file__).parent / "datasets"
+
+
+@dataclass(frozen=True)
+class ExpectedValue:
+    """一个可自动判分的数值真值。
+
+    value/tolerance 用于 Python 侧确定性比对；
+    description 是字段语义，喂给 answer_correctness 的抽取器，
+    让它知道要从答案里找哪个数（而不是找"正确的"数）。
+    """
+    value: float
+    tolerance: float
+    description: str
+
+
+@dataclass(frozen=True)
+class GroundTruthSource:
+    """GT 溯源：这个数字是从哪张表的哪几列来的。
+
+    手写 GT 无法回答"你怎么知道这是对的"，这个字段就是答案。
+    """
+    table: str
+    columns: list[str]
+    ticker: str | None = None
+    period_end: str | None = None       # ISO 日期，锚定时间的唯一可信列
+    generator: str | None = None        # 生成器模板名，便于按模板切片分析
+    note: str = ""
 
 
 @dataclass
 class Question:
     qid: str
-    set_name: str          # "A" | "B" | "C"
+    set_name: str          # "A" | "B" | "C" | "D" | "E" | "F"
     question: str
     ground_truth: str      # 参考答案（用于 recall 评估）
     key_facts: list[str] = field(default_factory=list)   # 必须出现在 context 中的关键事实
+    # ── 以下仅自动生成题（Set E）填充 ────────────────────────
+    expected: dict[str, ExpectedValue] | None = None     # 字段名 → 数值真值，供 answer_correctness
+    source: GroundTruthSource | None = None              # GT 溯源
 
 
 SET_A: list[Question] = [
@@ -253,7 +295,130 @@ SET_D: list[Question] = [
     ),
 ]
 
-ALL_QUESTIONS = SET_A + SET_B + SET_C + SET_D
+# ── Set F: 域外拒答（应被 Planner 的 in_scope 前置拦截）──────────
+#
+# 与 Set C 的区别：Set C 是"域内但数据缺失/推测"（走完整管道后由
+# Synthesizer 拒答）；Set F 是"完全不属于 MacroLens 领域"，应在
+# Planner 阶段就以 in_scope=false 短路，根本不进入检索与合成。
+#
+# 期望行为：per_loop.run() 返回 reject_reason，context 为空（0 检索）。
+# key_facts=[] —— 没有任何事实需要出现在 context 中。
+#
+# 反例护栏：C02（广告增速 vs GDP）、C05（GOOGL vs AMZN）看起来像域外，
+# 实为域内跨源比较，必须留在 Set C，不得被误挡。跑 eval 时应确认
+# Set C 分数不因本过滤下降。
+
+SET_F: list[Question] = [
+    Question(
+        qid="F01",
+        set_name="F",
+        question="What's the weather in Dublin today?",
+        ground_truth="Out of scope: MacroLens only covers MAG7 companies and US macroeconomics, not weather.",
+        key_facts=[],
+    ),
+    Question(
+        qid="F02",
+        set_name="F",
+        question="How do I write a for loop in Python?",
+        ground_truth="Out of scope: this is a general programming question, unrelated to financial research.",
+        key_facts=[],
+    ),
+    Question(
+        qid="F03",
+        set_name="F",
+        question="Can you give me a recipe for a classic Italian carbonara?",
+        ground_truth="Out of scope: cooking recipes are entirely outside MacroLens's financial domain.",
+        key_facts=[],
+    ),
+    Question(
+        qid="F04",
+        set_name="F",
+        question="What was Spotify's revenue last year?",
+        ground_truth=(
+            "Out of scope: Spotify is not one of the supported MAG7 tickers "
+            "(GOOGL, MSFT, META, AMZN, AAPL, NVDA, TSLA) and has no ingested data."
+        ),
+        key_facts=[],
+    ),
+    Question(
+        qid="F05",
+        set_name="F",
+        question="Who won the 2022 FIFA World Cup?",
+        ground_truth="Out of scope: sports results are unrelated to MAG7 companies or US macroeconomics.",
+        key_facts=[],
+    ),
+]
+
+# ── Set E: 自动生成题（从真值表程序化生成）────────────────────
+#
+# 不在代码里手写，而是由 eval/generators/*.py 读数据库生成 JSONL，
+# 产物 check 进 git。这样：
+#   1. 评测集可复现、可 diff（v22 和 v23 跑的是不是同一批题？git 说了算）
+#   2. GT 可 code review
+#   3. 数据刷新后重跑生成器，git diff 直接暴露哪些真值变了
+#   4. run_eval 不需要连数据库就能构建题目
+
+
+def to_jsonl_dict(q: Question) -> dict:
+    """Question → JSONL 行（供生成器写文件）。"""
+    d: dict = {
+        "qid": q.qid,
+        "set_name": q.set_name,
+        "question": q.question,
+        "ground_truth": q.ground_truth,
+        "key_facts": q.key_facts,
+    }
+    if q.expected:
+        d["expected"] = {
+            k: {"value": v.value, "tolerance": v.tolerance, "description": v.description}
+            for k, v in q.expected.items()
+        }
+    if q.source:
+        d["source"] = {
+            "table": q.source.table,
+            "columns": q.source.columns,
+            "ticker": q.source.ticker,
+            "period_end": q.source.period_end,
+            "generator": q.source.generator,
+            "note": q.source.note,
+        }
+    return d
+
+
+def from_jsonl_dict(d: dict) -> Question:
+    """JSONL 行 → Question。"""
+    expected = None
+    if d.get("expected"):
+        expected = {k: ExpectedValue(**v) for k, v in d["expected"].items()}
+    source = GroundTruthSource(**d["source"]) if d.get("source") else None
+    return Question(
+        qid=d["qid"],
+        set_name=d["set_name"],
+        question=d["question"],
+        ground_truth=d["ground_truth"],
+        key_facts=d.get("key_facts", []),
+        expected=expected,
+        source=source,
+    )
+
+
+def load_generated(pattern: str = "set_e_*.jsonl") -> list[Question]:
+    """加载 eval/datasets/ 下所有生成的题集。文件不存在时返回空列表。"""
+    questions: list[Question] = []
+    if not DATASET_DIR.is_dir():
+        return questions
+    for path in sorted(DATASET_DIR.glob(pattern)):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    questions.append(from_jsonl_dict(json.loads(line)))
+    return questions
+
+
+SET_E: list[Question] = load_generated()
+
+ALL_QUESTIONS = SET_A + SET_B + SET_C + SET_D + SET_F + SET_E
 
 
 def get_set(name: str) -> list[Question]:

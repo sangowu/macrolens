@@ -30,7 +30,7 @@ import psycopg
 import gradio as gr
 from pgvector.psycopg import register_vector
 
-from agent.planner import plan
+from agent.planner import plan, plan_scoped
 from agent.executor import execute
 from agent.critic import critique
 from agent.synthesizer import synthesize, _format_context
@@ -107,6 +107,24 @@ def run_query(
 
             if iteration == 1:
                 prompt = question
+                # 域内判断：完全越界的问题直接拒答，不进入检索/合成。
+                in_scope, reject_reason, sub_queries = plan_scoped(prompt, llm)
+                input_tokens_approx += _count_tokens_approx(prompt)
+                if not in_scope:
+                    logger.info(f"[PLAN] out-of-scope, rejecting | reason={reject_reason}")
+                    answer = reject_reason or "该问题超出 MacroLens 的范围（MAG7 公司与美国宏观经济）。"
+                    history = history + [
+                        {"role": "user", "content": question},
+                        {"role": "assistant", "content": answer},
+                    ]
+                    stats_md = _build_stats_md(
+                        iterations=1,
+                        n_context=0,
+                        input_tokens=input_tokens_approx,
+                        output_tokens=_count_tokens_approx(answer),
+                        elapsed=time.time() - t_start,
+                    )
+                    return history, "_超出范围，未检索_", stats_md, ""
             else:
                 already = ", ".join(f'"{q}"' for q in searched_queries)
                 prompt = (
@@ -114,9 +132,8 @@ def run_query(
                     f"Focus on what's still missing: {missing_hint}\n"
                     f"Already searched (do NOT repeat these queries): [{already}]"
                 )
-
-            sub_queries = plan(prompt, llm)
-            input_tokens_approx += _count_tokens_approx(prompt)
+                sub_queries = plan(prompt, llm)
+                input_tokens_approx += _count_tokens_approx(prompt)
             searched_queries.extend(sq["query"] for sq in sub_queries)
 
             logger.info(f"[PLAN] {len(sub_queries)} sub-queries:")

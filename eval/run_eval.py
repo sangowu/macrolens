@@ -35,7 +35,7 @@ from models.factory import create_embedding, create_judge_llm_client, create_llm
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sets", nargs="+", default=["A"], choices=["A", "B", "C", "D"])
+    parser.add_argument("--sets", nargs="+", default=["A"], choices=["A", "B", "C", "D", "E", "F"])
     parser.add_argument("--qids", nargs="+", default=[], help="Only run specific question IDs (e.g. B03 D02)")
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--config", default="config.yaml")
@@ -63,7 +63,9 @@ def main() -> None:
     fieldnames = [
         "qid", "set", "question",
         "faithfulness", "answer_relevancy", "context_precision", "context_recall", "ragas_score",
+        "answer_correctness",
         "faithfulness_reason", "answer_relevancy_reason", "context_precision_reason", "context_recall_reason",
+        "answer_correctness_reason", "answer_correctness_fields",
         "context_items", "latency_s", "answer_preview",
     ]
 
@@ -85,7 +87,9 @@ def main() -> None:
                     )
                     latency = round(time.time() - t0, 1)
 
-                    metrics = evaluate_all(q.question, q.ground_truth, answer, context, judge_llm)
+                    metrics = evaluate_all(
+                        q.question, q.ground_truth, answer, context, judge_llm, expected=q.expected
+                    )
 
                     row = {
                         "qid": q.qid,
@@ -102,6 +106,8 @@ def main() -> None:
                     def _fmt(v) -> str:
                         return f"{v:.3f}" if v is not None else "None"
                     print(f"  RAGAS: {_fmt(metrics.get('ragas_score'))} | faithfulness={_fmt(metrics.get('faithfulness'))} | relevancy={_fmt(metrics.get('answer_relevancy'))} | precision={_fmt(metrics.get('context_precision'))} | recall={_fmt(metrics.get('context_recall'))} | {latency}s")
+                    if metrics.get("answer_correctness") is not None:
+                        print(f"  CORRECTNESS: {_fmt(metrics['answer_correctness'])} | {metrics.get('answer_correctness_reason','')}")
 
                 except Exception as e:
                     print(f"  ERROR: {e}")
@@ -114,19 +120,30 @@ def main() -> None:
     _print_summary(output_path)
 
 
+def _col(rows: list[dict], key: str) -> list[float]:
+    return [float(r[key]) for r in rows if r.get(key) not in (None, "", "None")]
+
+
 def _print_summary(path: Path) -> None:
     import statistics
     rows = list(csv.DictReader(open(path, encoding="utf-8")))
-    for set_name in ["A", "B", "C", "D"]:
+    for set_name in ["A", "B", "C", "D", "E", "F"]:
         set_rows = [r for r in rows if r["set"] == set_name]
         if not set_rows:
             continue
-        scores = [float(r["ragas_score"]) for r in set_rows if r.get("ragas_score") and r["ragas_score"] != "None"]
+        scores = _col(set_rows, "ragas_score")
         if scores:
             print(f"\nSet {set_name} ({len(scores)} questions):")
             print(f"  RAGAS avg:  {statistics.mean(scores):.3f}")
             print(f"  RAGAS min:  {min(scores):.3f}")
             print(f"  RAGAS max:  {max(scores):.3f}")
+
+        correctness = _col(set_rows, "answer_correctness")
+        if correctness:
+            perfect = sum(1 for c in correctness if c == 1.0)
+            zero = sum(1 for c in correctness if c == 0.0)
+            print(f"  answer_correctness avg: {statistics.mean(correctness):.3f} "
+                  f"({perfect}/{len(correctness)} 全对, {zero} 全错)")
 
 
 if __name__ == "__main__":

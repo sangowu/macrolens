@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.critic import critique
 from agent.executor import execute
-from agent.planner import plan
+from agent.planner import plan, plan_scoped
 from agent.synthesizer import synthesize
 from models.base import RerankerBackend
 from models.config import load_config
@@ -42,6 +42,14 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
 
         if iteration == 1:
             prompt = question
+            # 域内判断只在第一轮做：完全越界的问题直接拒答，
+            # 避免空跑 3 轮 PER Loop 浪费检索与 LLM 调用。
+            in_scope, reject_reason, sub_queries = plan_scoped(prompt, llm)
+            if not in_scope:
+                if verbose:
+                    print(f"Plan: out-of-scope — {reject_reason}")
+                fallback = "This question is outside MacroLens's scope (MAG7 companies and US macroeconomics)."
+                return (reject_reason or fallback), []
         else:
             already = ", ".join(f'"{q}"' for q in searched_queries)
             prompt = (
@@ -49,8 +57,7 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
                 f"Focus on what's still missing: {missing_hint}\n"
                 f"Already searched (do NOT repeat these queries): [{already}]"
             )
-
-        sub_queries = plan(prompt, llm, history=history if iteration > 1 else None)
+            sub_queries = plan(prompt, llm, history=history)
 
         if verbose:
             print(f"Plan: {len(sub_queries)} sub-queries")
