@@ -24,16 +24,16 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env", encoding="utf-8")
 
 import psycopg
+from bs4 import BeautifulSoup
 from pgvector.psycopg import register_vector
 from tqdm import tqdm
-from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from eval.metrics import context_precision, context_recall
 from eval.questions import SET_A
-from ingestion.ingest_sec import iter_filing_files, parse_filing_meta
 from ingestion.chunkers import FixedChunker, RecursiveChunker, SemanticChunker
+from ingestion.ingest_sec import iter_filing_files, parse_filing_meta
 from models.config import load_config
 from models.factory import create_embedding, create_llm_client
 
@@ -113,7 +113,7 @@ def build_table(conn: psycopg.Connection, embedder, files: list[Path]) -> None:
                 vectors = embedder.encode(chunks, batch_size=32)
 
                 rows = []
-                for text_chunk, vec in zip(chunks, vectors):
+                for text_chunk, vec in zip(chunks, vectors, strict=False):
                     token_count = len(enc.encode(text_chunk))
                     rows.append({
                         "strategy":    chunker.name,

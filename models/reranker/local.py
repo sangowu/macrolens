@@ -2,8 +2,8 @@ from __future__ import annotations
 
 try:
     from FlagEmbedding import FlagReranker
-except ImportError:
-    raise ImportError("FlagEmbedding 未安装，请执行: pip install FlagEmbedding")
+except ImportError as e:
+    raise ImportError("FlagEmbedding 未安装，请执行: pip install FlagEmbedding") from e
 
 
 class LocalReranker:

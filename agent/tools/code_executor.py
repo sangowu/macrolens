@@ -13,12 +13,12 @@ import math
 import statistics
 import threading
 from contextlib import redirect_stdout
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 try:
-    import pandas as pd
     import numpy as np
+    import pandas as pd
     _HAS_PANDAS = True
 except ImportError:
     _HAS_PANDAS = False

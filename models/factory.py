@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 from models.base import EmbeddingBackend, RerankerBackend
 from models.config import AppConfig
@@ -26,16 +26,10 @@ def create_embedding(cfg: AppConfig) -> EmbeddingBackend:
         from models.embedding.remote import RemoteEmbedding
         return RemoteEmbedding(base_url=cfg.embedding.remote.base_url)
 
-    if backend == "online":
-        from models.embedding.online import OnlineEmbedding
-        c = cfg.embedding.online
-        return OnlineEmbedding(
-            provider=c.provider,
-            model=c.model,
-            dim=c.dim,
-            api_key=os.environ[c.api_key_env],
-            base_url=c.base_url,
-        )
+    if backend == "local_server":
+        from models.embedding.local_server import LocalServerEmbedding
+        c = cfg.embedding.local_server
+        return LocalServerEmbedding(base_url=c.base_url, model=c.model, dim=c.dim)
 
     raise ValueError(f"Unknown embedding backend: {backend!r}")
 
@@ -67,10 +61,6 @@ def create_reranker(cfg: AppConfig) -> RerankerBackend:
 def create_llm_client(cfg: AppConfig) -> LLMClient:
     api_key = os.environ[cfg.llm.api_key_env]
 
-    if cfg.llm.provider == "anthropic":
-        from models.llm.anthropic_client import AnthropicClient
-        return AnthropicClient(model=cfg.llm.model, api_key=api_key)
-
     if cfg.llm.provider == "gemini":
         from models.llm.gemini_client import GeminiClient
         return GeminiClient(model=cfg.llm.model, api_key=api_key)
@@ -85,10 +75,6 @@ def create_judge_llm_client(cfg: AppConfig) -> LLMClient:
         return create_llm_client(cfg)
 
     api_key = os.environ[judge.api_key_env]
-
-    if judge.provider == "anthropic":
-        from models.llm.anthropic_client import AnthropicClient
-        return AnthropicClient(model=judge.model, api_key=api_key)
 
     if judge.provider == "gemini":
         from models.llm.gemini_client import GeminiClient

@@ -35,8 +35,15 @@ _JUDGE_TOOL = {
 
 
 def _format_context(context: list[dict]) -> str:
+    # Structured sources (short entries) — show ALL to prevent false-missing reports
+    # on large contexts. Long sources (sec_chunks, events) capped at 40 entries.
+    STRUCTURED = {"macro_indicators", "price_history", "earnings_history"}
+    structured = [c for c in context if c["source"] in STRUCTURED]
+    long_form  = [c for c in context if c["source"] not in STRUCTURED][:40]
+    ordered = structured + long_form
+
     parts = []
-    for i, item in enumerate(context[:20], 1):
+    for i, item in enumerate(ordered, 1):
         src = item["source"]
         if src == "sec_chunks":
             parts.append(f"[{i}][SEC {item.get('doc_type','')} {item.get('fiscal_year','')} {item.get('section','')}]\n{item['content'][:400]}")

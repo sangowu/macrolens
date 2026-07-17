@@ -9,6 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Common Commands
 
 ```bash
+# 本地 embedding server（llama.cpp，检索/入库/评估前必须先起）
+D:\Python_Projects\llama.cpp\llama-server.exe -m D:\Python_Projects\llama.cpp\models\Qwen3-Embedding-0.6B-f16.gguf --embedding --pooling last -ngl 99 -c 2048 -b 2048 -ub 2048 --host 127.0.0.1 --port 8081
+
 # 启动三个服务（分别开终端）
 uv run ui/app.py                              # Gradio UI  :7860
 uv run uvicorn api.tasks:app --port 7878      # Task API   :7878
@@ -47,6 +50,8 @@ Plan  →  Execute  →  Critique  →  (最多 3 轮)  →  Synthesize
 
 每轮都把 `missing_hint` 和 `searched_queries` 带回 Planner，避免重复检索。
 
+**域外前置过滤**：第一轮 `plan_scoped()` 返回 `(in_scope, reject_reason, sub_queries)`。完全域外的问题（天气、通用编程、闲聊）判 `in_scope=false`，`per_loop.run()` / UI 直接短路返回 `reject_reason`，不进检索。数据缺失/推测型问题（未来数据、未入库 ticker、跨源比较）仍属域内，交下游 Synthesizer 拒答。判定只依赖 Planner（Gemini），不依赖 embedding。
+
 ### 四个 Agent 组件
 
 | 文件 | 职责 | LLM 调用方式 |
@@ -63,22 +68,31 @@ Plan  →  Execute  →  Critique  →  (最多 3 轮)  →  Synthesize
 - `chat_with_tools()` — 单次强制 tool call，返回 tool input dict（用于 Planner/Critic/Memory）
 - `chat_agentic()` — 多轮 agentic loop，LLM 可反复调用 tool 直到 end_turn（用于 Synthesizer）
 
-实现：`models/llm/anthropic_client.py` 和 `models/llm/gemini_client.py`，通过 `models/factory.py::create_llm_client()` 按 `config.yaml` 实例化。
+实现：`models/llm/gemini_client.py`（当前唯一 provider），通过 `models/factory.py::create_llm_client()` 按 `config.yaml` 实例化。新增 provider 只需实现 `LLMClient` Protocol 并在 factory 加分支。
 
 ### 数据源路由（Executor）
 
 `agent/executor.py` 按子查询的 `sources` 字段路由：
 
-- **`sec_chunks`** — pgvector 语义 + tsvector 全文 → RRF 融合
-- **`events`** — 同上，但查 events 表
+- **`sec_chunks`** — pgvector 语义 + tsvector 全文 → RRF 融合 → **Reranker 精排**（取 candidate_k 候选，cross-encoder 重排后截 top_k）
+- **`events`** — 同上（同样经过 Reranker）
 - **`macro_indicators`** — 精确 SQL，按 series_id + 日期范围。Planner 漏填 series 时，`_infer_series()` 从查询文本关键词自动推断
+
+### Reranker
+
+`models/reranker/` 提供三种后端（`local` / `remote` / `online`）。当前配置：`remote`，指向本地 Docker 容器（`cloud_server/`）运行的 BGE-reranker-v2-m3 服务（端口 6006）。Reranker 调用失败时自动 fallback 到 RRF 排序，不影响主流程。
+
+启动服务：
+```bash
+docker run --gpus all -p 6006:8000 macrolens-model-server
+```
 
 ### 配置
 
 唯一配置入口：`config.yaml`。`models/config.py::load_config()` 读取，传给 `models/factory.py` 工厂方法。
 
-切换 LLM：修改 `config.yaml` 的 `llm.provider`（`gemini`/`anthropic`）和 `llm.model`。  
-切换 Embedding：修改 `embedding.backend`（`online`/`local_bge`/`local_qwen`/`remote`）。
+切换 LLM 模型：修改 `config.yaml` 的 `llm.model`（当前 provider 为 `gemini`）。  
+切换 Embedding：修改 `embedding.backend`（`local_server`/`local_bge`/`local_qwen`/`remote`）。默认 `local_server`——本地 llama.cpp 跑 Qwen3-Embedding-0.6B（F16 GGUF），OpenAI 兼容 endpoint（`http://127.0.0.1:8081/v1`），无需外部 API key。启动：`llama-server -m Qwen3-Embedding-0.6B-f16.gguf --embedding --pooling last -ngl 99 --port 8081`。
 
 **注意**：Gemini pro 系列默认启用 AFC（Automatic Function Calling），会破坏 `chat_agentic` 的手动 tool 执行循环。当前稳定配置是 `gemini-3.1-flash-lite-preview`。
 

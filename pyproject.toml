@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=0.97.0",
     "fastapi>=0.136.1",
     "fredapi>=0.5.2",
     "google-genai>=1.74.0",
@@ -31,4 +30,24 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "docs/html", "migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # 行长由 formatter 控制，不做硬性报错
+    "E402",  # 脚本入口普遍在 sys.path.insert / load_dotenv 之后再 import，属项目约定
+]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true   # yfinance / fredapi / sec_edgar 等无类型 stub
+check_untyped_defs = true
+exclude = ["\\.venv", "docs/", "migrations/"]

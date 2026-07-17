@@ -113,7 +113,7 @@ def embed_series_meta(conn: psycopg.Connection, cfg) -> None:
     vectors = embedder.encode(texts, batch_size=len(texts))
 
     with conn.cursor() as cur:
-        for (series_id, _, _), vec in zip(rows, vectors):
+        for (series_id, _, _), vec in zip(rows, vectors, strict=False):
             cur.execute(
                 "UPDATE macro_series_meta SET embedding = %s WHERE series_id = %s",
                 (vec, series_id),

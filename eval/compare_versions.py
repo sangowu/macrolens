@@ -21,7 +21,6 @@ import csv
 import sys
 from pathlib import Path
 
-
 METRICS = ["faithfulness", "answer_relevancy", "context_precision", "context_recall", "ragas_score"]
 
 
@@ -71,7 +70,7 @@ def _plot_comparison(
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
 
-    for i, (a, b) in enumerate(zip(v1_vals, v2_vals)):
+    for i, (a, b) in enumerate(zip(v1_vals, v2_vals, strict=False)):
         delta = b - a
         color = "#16a34a" if delta >= 0 else "#dc2626"
         ax.text(i + w / 2, b + 0.02, f"{delta:+.3f}", ha="center", fontsize=8, color=color, fontweight="bold")
@@ -161,7 +160,7 @@ def main() -> None:
     lat2 = [safe_float(v2[q].get("latency_s")) for q in common_qids if safe_float(v2[q].get("latency_s"))]
     if lat1 and lat2:
         print(f"\n  Latency: v1 avg={sum(lat1)/len(lat1):.1f}s  v2 avg={sum(lat2)/len(lat2):.1f}s  Δ={sum(lat2)/len(lat2)-sum(lat1)/len(lat1):+.1f}s")
-        print(f"  (v2 adds one extra LLM call for evidence selection — expected latency increase)")
+        print("  (v2 adds one extra LLM call for evidence selection — expected latency increase)")
 
     if args.plot:
         _plot_comparison(all_v1, all_v2, Path(v1_path).stem, Path(v2_path).stem)

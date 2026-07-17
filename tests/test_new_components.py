@@ -7,21 +7,20 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agent.synthesizer import _validate_citations, _format_context, _compute_executor
-from agent.planner import plan
-
+from agent.planner import plan, plan_scoped
+from agent.synthesizer import _compute_executor, _format_context, _validate_citations
 
 # ── Mock LLM ──────────────────────────────────────────────
 
 class MockLLM:
-    provider = "anthropic"
+    provider = "gemini"
 
     def __init__(self, tool_responses: dict[str, dict] | None = None, chat_response: str = ""):
         self._tool_responses = tool_responses or {}
@@ -58,6 +57,49 @@ class TestPlanner:
         llm = MockLLM(tool_responses={"create_query_plan": {}})
         result = plan("Any question", llm)
         assert result == []
+
+    def test_scoped_defaults_to_in_scope_when_field_absent(self):
+        # 旧 mock 不返回 in_scope，应默认视为域内，向后兼容 plan()。
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {"sub_queries": [{"query": "x", "sources": ["sec_chunks"]}]}
+        })
+        in_scope, reason, subs = plan_scoped("Google revenue 2023?", llm)
+        assert in_scope is True
+        assert reason == ""
+        assert len(subs) == 1
+
+    def test_scoped_rejects_out_of_domain_question(self):
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {
+                "in_scope": False,
+                "reject_reason": "This question is unrelated to MAG7 companies or US macroeconomics.",
+                "sub_queries": [],
+            }
+        })
+        in_scope, reason, subs = plan_scoped("What's the weather in Dublin today?", llm)
+        assert in_scope is False
+        assert "MAG7" in reason
+        assert subs == []
+
+    def test_speculative_question_stays_in_scope(self):
+        # 未来/推测型问题仍属域内，由下游合成处理数据缺失，不应被前置拒答。
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {
+                "in_scope": True,
+                "reject_reason": "",
+                "sub_queries": [{"query": "GOOGL price history", "sources": ["price_history"]}],
+            }
+        })
+        in_scope, _, subs = plan_scoped("What was Google's revenue in 2030?", llm)
+        assert in_scope is True
+        assert len(subs) == 1
+
+    def test_plan_delegates_and_drops_scope(self):
+        # plan() 是向后兼容入口，越界时返回空列表。
+        llm = MockLLM(tool_responses={
+            "create_query_plan": {"in_scope": False, "reject_reason": "out", "sub_queries": []}
+        })
+        assert plan("unrelated", llm) == []
 
     def test_passes_history_in_second_round(self):
         captured = {}
@@ -131,8 +173,9 @@ class TestComputeExecutor:
 
 class TestExecutorMacroSeries:
     def test_string_normalized_to_list(self):
-        from agent.executor import _search_macro
         from unittest.mock import MagicMock
+
+        from agent.executor import _search_macro
 
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -161,14 +204,14 @@ class TestSourcesFilter:
         ]
 
     def test_only_cited_shown(self):
-        from ui.app import _build_sources_md
+        from ui.formatting import _build_sources_md
         result = _build_sources_md(self._ctx(), answer="Revenue [1] and [3].")
         assert "Revenue 1" in result
         assert "Revenue 3" in result
         assert "Revenue 2" not in result
 
     def test_no_answer_shows_all(self):
-        from ui.app import _build_sources_md
+        from ui.formatting import _build_sources_md
         result = _build_sources_md(self._ctx(), answer="")
         assert "Revenue 1" in result
         assert "Revenue 2" in result
@@ -180,6 +223,7 @@ class TestSourcesFilter:
 class TestMemoryExtract:
     def test_extract_returns_findings(self):
         from unittest.mock import MagicMock
+
         import psycopg
 
         llm = MockLLM(tool_responses={
@@ -223,6 +267,7 @@ class TestContextPrecision:
 
     def _run(self, relevance: list[bool], reason: str = "test") -> dict:
         import json
+
         from eval.metrics import context_precision
 
         llm = MockLLM(chat_response=json.dumps({"relevance": relevance, "reason": reason}))
@@ -266,6 +311,7 @@ class TestContextRecall:
 
     def _run(self, response: dict) -> dict:
         import json
+
         from eval.metrics import context_recall
 
         llm = MockLLM(chat_response=json.dumps(response))

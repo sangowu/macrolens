@@ -23,13 +23,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.critic import critique
 from agent.executor import execute
-from agent.planner import plan
+from agent.planner import plan, plan_scoped
 from agent.synthesizer import synthesize
+from models.base import RerankerBackend
 from models.config import load_config
-from models.factory import create_embedding, create_llm_client
+from models.factory import create_embedding, create_llm_client, create_reranker
 
 
-def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: int = 3, verbose: bool = False) -> str:
+def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: int = 3, verbose: bool = False, reranker: RerankerBackend | None = None) -> str:
     all_context: list[dict] = []
     history: list[dict] = []
     missing_hint = ""
@@ -41,6 +42,14 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
 
         if iteration == 1:
             prompt = question
+            # 域内判断只在第一轮做：完全越界的问题直接拒答，
+            # 避免空跑 3 轮 PER Loop 浪费检索与 LLM 调用。
+            in_scope, reject_reason, sub_queries = plan_scoped(prompt, llm)
+            if not in_scope:
+                if verbose:
+                    print(f"Plan: out-of-scope — {reject_reason}")
+                fallback = "This question is outside MacroLens's scope (MAG7 companies and US macroeconomics)."
+                return (reject_reason or fallback), []
         else:
             already = ", ".join(f'"{q}"' for q in searched_queries)
             prompt = (
@@ -48,8 +57,7 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
                 f"Focus on what's still missing: {missing_hint}\n"
                 f"Already searched (do NOT repeat these queries): [{already}]"
             )
-
-        sub_queries = plan(prompt, llm, history=history if iteration > 1 else None)
+            sub_queries = plan(prompt, llm, history=history)
 
         if verbose:
             print(f"Plan: {len(sub_queries)} sub-queries")
@@ -58,16 +66,22 @@ def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: i
 
         searched_queries.extend(sq["query"] for sq in sub_queries)
 
-        new_context = execute(sub_queries, conn, embedder, cfg.llm)
+        new_context = execute(sub_queries, conn, embedder, cfg.llm, reranker=reranker)
 
-        seen = {
-            (c.get("id") or c.get("event_id")
-             or c.get("ticker", "") + str(c.get("date", "")) + c.get("series_id", ""))
-            for c in all_context
-        }
+        def _dedup_key(c: dict) -> str:
+            return (
+                c.get("id") or c.get("event_id")
+                or (
+                    c.get("ticker", "")
+                    + str(c.get("period_end") or c.get("date", ""))
+                    + c.get("series_id", "")
+                    + str(c.get("fiscal_quarter", ""))
+                )
+            )
+
+        seen = {_dedup_key(c) for c in all_context}
         for c in new_context:
-            key = (c.get("id") or c.get("event_id")
-                   or c.get("ticker", "") + str(c.get("date", "")) + c.get("series_id", ""))
+            key = _dedup_key(c)
             if key not in seen:
                 all_context.append(c)
                 seen.add(key)
@@ -112,9 +126,10 @@ def main() -> None:
 
     embedder = create_embedding(cfg)
     llm = create_llm_client(cfg)
+    reranker = create_reranker(cfg)
 
     with psycopg.connect(cfg.db.dsn) as conn:
-        answer, _ = run(question, cfg, conn, embedder, llm, max_iter=args.max_iter, verbose=args.verbose)
+        answer, _ = run(question, cfg, conn, embedder, llm, max_iter=args.max_iter, verbose=args.verbose, reranker=reranker)
 
     print("\n" + "=" * 60)
     print(answer)

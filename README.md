@@ -115,6 +115,10 @@ GET /api/tasks/{id}  →  {"status": "completed", "report_md": "..."}
 
 After each task, an LLM call extracts 2-4 key findings and stores them as vector embeddings. Future tasks retrieve relevant prior findings via similarity search and inject them into the planning context — giving the agent continuity across sessions.
 
+### Scope Gating (out-of-domain filtering)
+
+The Planner classifies each question before decomposition. Fully out-of-domain questions (weather, general coding, chitchat) are marked `in_scope=false` and short-circuited with a rejection message — no retrieval, no wasted PER Loop iterations. Questions that are in-domain but currently unanswerable (future data, un-ingested tickers, cross-source comparisons) stay in the pipeline and are declined by the Synthesizer. Evaluated by **Set F** (5 out-of-domain questions); Set C guardrail questions (C02, C05) confirmed not falsely rejected.
+
 ---
 
 ## Data Coverage
@@ -209,8 +213,8 @@ Key improvements from v13 → v14 (monthly aggregation + eval fixes):
 
 | Layer | Technology |
 |-------|-----------|
-| LLM | Gemini / Claude (configurable) |
-| Embedding | Qwen3-Embedding-0.6B (ModelScope) / BGE-M3 |
+| LLM | Gemini (pluggable via `LLMClient` Protocol) |
+| Embedding | Qwen3-Embedding-0.6B (local llama.cpp, F16 GGUF) / BGE-M3 |
 | Reranker | qwen3-rerank (DashScope) / BGE-Reranker-v2-m3 |
 | Vector DB | PostgreSQL 17 + pgvector (HNSW index) |
 | Full-text | PostgreSQL tsvector (GIN index) |
@@ -228,7 +232,8 @@ Key improvements from v13 → v14 (monthly aggregation + eval fixes):
 
 - Python 3.11+
 - Docker (for PostgreSQL)
-- API keys: Gemini, ModelScope, DashScope, FRED
+- llama.cpp + `Qwen3-Embedding-0.6B-f16.gguf` (local embedding server, no API key)
+- API keys: Gemini, DashScope, FRED
 
 ### Setup
 
@@ -258,12 +263,17 @@ for f in ['migrations/001_init.sql', 'migrations/002_tasks_memory.sql']:
 print('DB ready')
 "
 
-# 5. Ingest data
+# 5. Start local embedding server (llama.cpp, Qwen3-Embedding-0.6B, F16)
+#    Download GGUF: Qwen/Qwen3-Embedding-0.6B-GGUF (ModelScope or HuggingFace)
+llama-server -m Qwen3-Embedding-0.6B-f16.gguf --embedding --pooling last \
+  -ngl 99 -c 2048 -b 2048 -ub 2048 --host 127.0.0.1 --port 8081
+
+# 6. Ingest data
 uv run ingestion/ingest_sec.py --ingest-only
 uv run ingestion/ingest_fred.py
 uv run ingestion/ingest_events.py
 
-# 6. Launch (three terminals)
+# 7. Launch (three terminals)
 uv run ui/app.py                                    # Gradio UI  :7860
 uv run uvicorn api.tasks:app --port 7878            # Task API   :7878
 uv run worker/task_worker.py --verbose              # Worker

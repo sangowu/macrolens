@@ -1,6 +1,6 @@
 # MacroLens Project Roadmap
 
-> Iteration history, current status, and future directions. Last updated: May 2026 (v15c).
+> Iteration history, current status, and future directions. Last updated: May 2026 (v21).
 
 ---
 
@@ -103,22 +103,30 @@
 
 ---
 
-## Current Status
+## Current Status (v21)
 
-| Metric | v12 | v14 | **v15c (current)** | vs v12 |
-|--------|-----|-----|--------------------|--------|
-| faithfulness | 0.667 | 0.710 | **0.897** | **+0.230** ✅ |
-| answer_relevancy | 0.972 | 0.952 | 0.872 | -0.100 ⚠️ |
-| context_precision | 0.688 | 0.622 | **0.696** | +0.008 ✅ |
-| context_recall | 0.651 | 0.490 | 0.519 | -0.132 ⚠️ |
-| **ragas_score** | 0.741 | 0.694 | **0.753** | **+0.012** ✅ |
+| Metric | v12 | v15c | **v21 (current)** | vs v15c |
+|--------|-----|------|-------------------|---------|
+| faithfulness | 0.667 | 0.891 | 0.717 | -0.174 ⚠️ |
+| answer_relevancy | 0.972 | 0.870 | **0.957** | **+0.087** ✅ |
+| context_precision | 0.688 | 0.691 | 0.667 | -0.024 → |
+| context_recall | 0.651 | 0.512 | **0.549** | **+0.037** ✅ |
+| **ragas_score** | 0.741 | **0.753** | 0.725 | -0.028 → |
 
-**Open issues:**
+**Key changes since v15c (performance optimization phase):**
 
-1. **context_recall (0.519) still below v12 baseline (0.651)**: D03 ground_truth key_facts include computed values ("425 basis points", "Pearson -0.4 to -0.6") that don't exist as raw values in the database — recall cannot be improved through retrieval alone; requires revising Set D ground_truth design
-2. **answer_relevancy (0.872) below v12 (0.972)**: RETRIEVAL GAP mechanism causes A04-type questions to correctly refuse ("context does not contain X"), lowering relevancy score; the root fix is improving SEC chunk retrieval to ensure the annual financial table chunk is consistently retrieved
+- **Set D ground_truth revision** (v17b): key_facts replaced with raw DB values — D01/D03/D04 recall improved significantly
+- **earnings_history dedup fix** (v17b): per_loop.py dedup key adds period_end + fiscal_quarter — D02 recall 0→1.0
+- **EPS precision fix** (v17e): synthesizer.py eps_surprise_pct format +.1f → +.2f — D02 faithfulness 0.5→1.0
+- **Reranker integration** (v18+): BGE-reranker-v2-m3 via Docker (`cloud_server/`); candidate_k=50 candidates → cross-encoder reranking → top_k=12; auto-fallback to RRF on API failure
+- **Smart Critic window** (v21): structured data (macro/price/earnings) shown in full, sec_chunks/events capped at 40 — eliminates false-missing reports on large contexts
+- **RETRIEVAL GAP restored** (v21): re-enabled missing_hint injection after Critic window fix; faithfulness 0.687 → 0.717
 
-**Pending merge**: PR #1 (`feature/macrolens-expansion` → `main`) — 109 unit tests passing.
+**Remaining ceilings (not solvable by retrieval):**
+
+1. **A01/A04 faithfulness instability**: Annual ad revenue and Google Cloud annual total are in 10-K financial tables but not consistently retrieved in top-k; Synthesizer occasionally fills from background knowledge
+2. **B03 data gap**: 2022 SEC filings predate ChatGPT/OpenAI's rise to prominence; events table lacks AI competition entries
+3. **RAGAS faithfulness metric sensitivity**: a single hallucinated claim per answer subtracts 0.5; evaluation noise ≈ ±0.03
 
 ---
 
@@ -126,19 +134,20 @@
 
 - [x] **Fix D03 Planner routing**: MANDATORY MULTI-SOURCE RULE + updated examples ✅
 - [x] **Fix earnings_history / pe_ratio data**: yfinance API switch, EPS coverage 2014–2026 ✅
-- [x] **Fix Synthesizer hallucination**: NUMBERS/CAUSAL rule split + RETRIEVAL GAP mechanism ✅
-- [x] **v15c eval**: ragas_score 0.753, new all-time best ✅
-- [ ] **Merge PR #1** (`feature/macrolens-expansion` → `main`)
-- [ ] **Complete MAG7 data ingestion**: META / AMZN / AAPL / NVDA / TSLA SEC files
+- [x] **Fix Synthesizer hallucination**: NUMBERS/CAUSAL rule split ✅
+- [x] **v15c eval**: ragas_score 0.753, all-time best ✅
+- [x] **Set D ground_truth revision**: raw DB key_facts, D01/D03/D04 recall improved ✅
+- [x] **earnings dedup fix**: period_end + fiscal_quarter dedup key, D02 recall 0→1.0 ✅
+- [x] **Reranker integration**: BGE-reranker-v2-m3 Docker service, candidate_k=50 ✅
+- [x] **Smart Critic window + RETRIEVAL GAP restored** ✅
+- [x] **Performance optimization phase complete**: v21 ragas_score=0.725 ✅
 
 ---
 
-## Mid-term (1–3 Months)
+## Next Phase: Feature Expansion
 
-- [ ] **Fix answer_relevancy**: improve SEC chunk retrieval stability for A04-type (annual financial table), prevent table truncation at chunk boundaries
-- [ ] **Restore context_recall to v12 baseline (0.651)**: revise Set D ground_truth to replace computed key_facts with raw database values
 - [ ] **Gradio UI new panels**: valuation dashboard (P/E historical band chart), earnings comparison panel
-- [ ] **MAG7 data integrity check**: scheduled script to verify chunk counts and data freshness per ticker
+- [ ] **Complete MAG7 data ingestion**: META / AMZN / AAPL / NVDA / TSLA SEC files
 
 ---
 
@@ -162,3 +171,7 @@
 | v13 | MAG7 expansion + price/earnings data sources + Set D eval | 0.707 |
 | v14 | Monthly price aggregation + numerical ground_truth + compute tool hardening | 0.694 |
 | v15c | Planner routing fix + earnings/PE data fix + Synthesizer hallucination fix | **0.753** ★ |
+| v17b | Set D ground_truth revision + earnings dedup fix + EPS precision fix | 0.747 |
+| v19 | Reranker integration (Docker BGE-reranker-v2-m3), candidate_k=20 | 0.699 |
+| v20 | candidate_k 20→50, larger reranker candidate pool | 0.711 |
+| v21 | Smart Critic window + RETRIEVAL GAP restored, performance phase final | 0.725 |

@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -129,7 +129,7 @@ def fetch_earnings_history(ticker: str) -> pd.DataFrame:
             gross_margin = op_margin = None
             income_col = income_by_qend.get(period_end)
             if income_col is not None:
-                def _get(label: str):
+                def _get(label: str, income_col=income_col):
                     if label in quarterly.index:
                         v = quarterly.loc[label, income_col]
                         return float(v) / 1000 if pd.notna(v) else None

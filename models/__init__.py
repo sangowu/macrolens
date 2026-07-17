@@ -1,6 +1,6 @@
 from models.base import EmbeddingBackend, RerankerBackend
+from models.config import AppConfig, load_config
 from models.factory import create_embedding, create_reranker, managed_models
-from models.config import load_config, AppConfig
 
 __all__ = [
     "EmbeddingBackend",
