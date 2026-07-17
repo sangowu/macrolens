@@ -68,7 +68,7 @@ def main() -> None:
     with psycopg.connect(cfg.db.dsn) as conn:
         register_vector(conn)
         with conn.cursor() as cur:
-            with tqdm(zip(events, vectors), total=len(events), desc="写入", unit="event") as pbar:
+            with tqdm(zip(events, vectors, strict=False), total=len(events), desc="写入", unit="event") as pbar:
                 for event, vec in pbar:
                     pbar.set_postfix(id=event["event_id"])
                     cur.execute(INSERT_SQL, {**event, "embedding": vec})

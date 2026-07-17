@@ -17,22 +17,22 @@ def write_report(
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
     lines = [
-        f"# MacroLens Research Report",
-        f"",
+        "# MacroLens Research Report",
+        "",
         f"**Generated**: {now}  ",
         f"**Query**: {question}  ",
         f"**Iterations**: {iterations} | **Time**: {elapsed:.1f}s | **Context items**: {len(context)}",
-        f"",
-        f"---",
-        f"",
-        f"## Answer",
-        f"",
+        "",
+        "---",
+        "",
+        "## Answer",
+        "",
         answer,
-        f"",
-        f"---",
-        f"",
+        "",
+        "---",
+        "",
         f"## Evidence ({len(context)} sources)",
-        f"",
+        "",
     ]
 
     sec_items      = [c for c in context if c["source"] == "sec_chunks"]

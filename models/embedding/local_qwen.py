@@ -2,8 +2,8 @@ from __future__ import annotations
 
 try:
     from sentence_transformers import SentenceTransformer
-except ImportError:
-    raise ImportError("sentence-transformers 未安装，请执行: pip install sentence-transformers")
+except ImportError as e:
+    raise ImportError("sentence-transformers 未安装，请执行: pip install sentence-transformers") from e
 
 
 class LocalQwenEmbedding:

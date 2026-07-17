@@ -11,7 +11,6 @@ MacroLens Task API
 """
 from __future__ import annotations
 
-import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,10 +21,9 @@ load_dotenv(Path(__file__).parent.parent / ".env", encoding="utf-8")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import psycopg
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
-import psycopg
 
 from models.config import load_config
 

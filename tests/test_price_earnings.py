@@ -8,25 +8,23 @@ Phase 0 单元测试：price_history / earnings_history 数据处理逻辑。
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 from datetime import date
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from agent.tools.code_executor import execute_python
 from ingestion.ingest_prices import (
     _float,
     _int,
     compute_pe_ps_ratios,
-    ingest_prices,
     ingest_earnings,
-    fetch_price_history,
+    ingest_prices,
 )
-from agent.tools.code_executor import execute_python
-
 
 # ── 辅助函数 ──────────────────────────────────────────────
 
@@ -38,7 +36,6 @@ class TestHelpers:
         assert _float(None) is None
 
     def test_float_nan(self):
-        import math
         assert _float(float("nan")) is None
 
     def test_float_string(self):
@@ -337,7 +334,7 @@ class TestPriceHistoryGranularity:
 
     def test_short_range_uses_daily_sql(self):
         """<= 90 天 → 使用日线 SQL，结果含 pe_ratio 字段。"""
-        from agent.executor import _search_price_history, PRICE_HISTORY_SQL
+        from agent.executor import PRICE_HISTORY_SQL, _search_price_history
         rows = [("GOOGL", date(2024, 1, 2), 140.0, 140.0, 1_000_000, 24.5, None)]
         conn = self._mock_conn(rows)
 
@@ -354,7 +351,7 @@ class TestPriceHistoryGranularity:
 
     def test_long_range_uses_monthly_sql(self):
         """> 90 天 → 使用月度 SQL，结果含 avg_pe 字段。"""
-        from agent.executor import _search_price_history, PRICE_HISTORY_MONTHLY_SQL
+        from agent.executor import PRICE_HISTORY_MONTHLY_SQL, _search_price_history
         rows = [("GOOGL", date(2022, 1, 1), 2800.0, 2790.0, 24.1, 12)]
         conn = self._mock_conn(rows)
 
@@ -372,7 +369,7 @@ class TestPriceHistoryGranularity:
 
     def test_boundary_91_days_uses_monthly(self):
         """91 天（> 90）→ 月度 SQL。"""
-        from agent.executor import _search_price_history, PRICE_HISTORY_MONTHLY_SQL
+        from agent.executor import PRICE_HISTORY_MONTHLY_SQL, _search_price_history
         conn = self._mock_conn([])
         _search_price_history(conn, {
             "tickers": ["GOOGL"],

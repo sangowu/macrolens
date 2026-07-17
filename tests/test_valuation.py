@@ -10,13 +10,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from agent.synthesizer import _compute_executor, _format_context
 from agent.tools.code_executor import execute_python
-from agent.synthesizer import _format_context, _compute_executor
-
 
 # ── P/E 百分位 compute tool 计算 ──────────────────────────
 

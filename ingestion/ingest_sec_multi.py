@@ -294,7 +294,7 @@ def ingest_filing(conn: psycopg.Connection, chunks: list[dict], embedder) -> int
                 print(f"  [SKIP] embedding failed: {str(e)[:80]}")
                 vectors.append(None)
 
-    rows = [{**c, "embedding": v} for c, v in zip(chunks, vectors) if v is not None]
+    rows = [{**c, "embedding": v} for c, v in zip(chunks, vectors, strict=False) if v is not None]
     if not rows:
         return 0
     with conn.cursor() as cur:

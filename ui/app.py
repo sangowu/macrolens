@@ -10,9 +10,7 @@ MacroLens Gradio UI
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 import sys
 import threading
 import time
@@ -25,20 +23,20 @@ load_dotenv(Path(__file__).parent.parent / ".env", encoding="utf-8")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import os
-import psycopg
 import gradio as gr
+import psycopg
 from pgvector.psycopg import register_vector
 
-from agent.planner import plan, plan_scoped
-from agent.executor import execute
 from agent.critic import critique
-from agent.synthesizer import synthesize, _format_context
-from agent.per_loop import run as per_loop_run
-from agent.report_writer import write_report
+from agent.executor import execute
 from agent.memory import extract_and_store, retrieve
+from agent.per_loop import run as per_loop_run
+from agent.planner import plan, plan_scoped
+from agent.report_writer import write_report
+from agent.synthesizer import _format_context, synthesize
 from models.config import load_config
 from models.factory import create_embedding, create_llm_client
+from ui.formatting import _build_sources_md, _build_stats_md, _count_tokens_approx
 
 # ── 日志配置 ───────────────────────────────────────────────
 LOG_DIR = Path(__file__).parent.parent / "logs"
@@ -57,21 +55,27 @@ logging.basicConfig(
 logger = logging.getLogger("macrolens")
 
 # ── 全局初始化 ─────────────────────────────────────────────
+# cfg 仅读 config.yaml（无外部连接），import 即可加载；
+# embedder / llm 涉及外部依赖（llama.cpp :8081 / API key），惰性到 _startup()，
+# 使 `import ui.app`（例如单元测试导入 _build_sources_md）不触发任何网络 / DB 连接。
 cfg = load_config("config.yaml")
-embedder = create_embedding(cfg)
-llm = create_llm_client(cfg)
-
-# 启动时检查数据新鲜度（只读，< 5ms，不触发更新）
-try:
-    with psycopg.connect(cfg.db.dsn) as _chk_conn:
-        from worker.data_refresh_worker import check_and_warn_freshness
-        check_and_warn_freshness(_chk_conn)
-except Exception:
-    pass  # DB 未就绪时静默跳过
+embedder = None
+llm = None
 
 
-def _count_tokens_approx(text: str) -> int:
-    return len(text) // 4
+def _startup() -> None:
+    """初始化外部依赖：embedder、LLM、DB 新鲜度检查。仅在实际启动 UI 时调用。"""
+    global embedder, llm
+    embedder = create_embedding(cfg)
+    llm = create_llm_client(cfg)
+    # 启动时检查数据新鲜度（只读，< 5ms，不触发更新）
+    try:
+        with psycopg.connect(cfg.db.dsn) as _chk_conn:
+            from worker.data_refresh_worker import check_and_warn_freshness
+
+            check_and_warn_freshness(_chk_conn)
+    except Exception:
+        pass  # DB 未就绪时静默跳过
 
 
 # ══════════════════════════════════════════════════════════
@@ -187,54 +191,6 @@ def run_query(
     )
 
     return history, sources_md, stats_md, ""
-
-
-def _build_sources_md(context: list[dict], answer: str = "") -> str:
-    if not context:
-        return "_无检索结果_"
-
-    # 只展示答案中实际引用的 chunk，过滤未被引用的噪音
-    cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)} if answer else set()
-    items = [(i, item) for i, item in enumerate(context, 1) if not cited or i in cited]
-
-    if not items:
-        return "_无检索结果_"
-
-    parts = []
-    for i, item in items:
-        src = item["source"]
-        if src == "sec_chunks":
-            header = f"**[{i}] SEC {item.get('doc_type', '')} FY{item.get('fiscal_year', '')} — {item.get('section', '')}**"
-            date = f"Period end: {item.get('period_end', 'N/A')}"
-            preview = item.get("content", "")[:300].replace("\n", " ")
-            parts.append(f"{header}\n{date}\n\n> {preview}...")
-        elif src == "events":
-            header = f"**[{i}] Event [{item.get('date', '')}] {item.get('category', '')}**"
-            title = item.get("title", "")
-            desc = item.get("description", "")[:200].replace("\n", " ")
-            parts.append(f"{header}\n{title}\n\n> {desc}...")
-        elif src == "macro_indicators":
-            header = f"**[{i}] {item.get('title', item.get('series_id', ''))}**"
-            val = f"{item.get('date', '')}: **{item.get('value', 'N/A')}** {item.get('units', '')}"
-            parts.append(f"{header}\n{val}")
-
-    return "\n\n---\n\n".join(parts)
-
-
-def _build_stats_md(
-    iterations: int,
-    n_context: int,
-    input_tokens: int,
-    output_tokens: int,
-    elapsed: float,
-) -> str:
-    return f"""| 指标 | 值 |
-|------|-----|
-| PER 迭代次数 | {iterations} |
-| Context 条数 | {n_context} |
-| 输入 Token（估算） | ~{input_tokens:,} |
-| 输出 Token（估算） | ~{output_tokens:,} |
-| 总耗时 | {elapsed:.1f}s |"""
 
 
 # ══════════════════════════════════════════════════════════
@@ -496,4 +452,5 @@ with gr.Blocks(title="MacroLens") as demo:
 
 
 if __name__ == "__main__":
+    _startup()
     demo.launch(server_name="0.0.0.0", server_port=7860, share=False, theme=gr.themes.Soft())

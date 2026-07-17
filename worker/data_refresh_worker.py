@@ -35,11 +35,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ingestion.ingest_prices import (
     MAG7,
+    compute_pe_ps_ratios,
     fetch_earnings_history,
     fetch_price_history,
     ingest_earnings,
     ingest_prices,
-    compute_pe_ps_ratios,
 )
 from models.config import load_config
 

@@ -13,7 +13,6 @@ import csv
 import logging
 import sys
 import time
-from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format="%(name)s %(message)s", stream=sys.stdout)
 from pathlib import Path
@@ -28,9 +27,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.per_loop import run as per_loop_run
 from eval.metrics import evaluate_all
-from eval.questions import ALL_QUESTIONS, get_set
+from eval.questions import get_set
 from models.config import load_config
-from models.factory import create_embedding, create_judge_llm_client, create_llm_client, create_reranker
+from models.factory import (
+    create_embedding,
+    create_judge_llm_client,
+    create_llm_client,
+    create_reranker,
+)
 
 
 def main() -> None:

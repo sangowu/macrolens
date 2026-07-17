@@ -2,8 +2,8 @@ from __future__ import annotations
 
 try:
     import httpx
-except ImportError:
-    raise ImportError("httpx 未安装，请执行: pip install httpx")
+except ImportError as e:
+    raise ImportError("httpx 未安装，请执行: pip install httpx") from e
 
 
 class RemoteEmbedding:

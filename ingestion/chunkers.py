@@ -140,7 +140,7 @@ class SemanticChunker:
         return [s.strip() for s in sentences if s.strip()]
 
     def _cosine(self, a: list[float], b: list[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         na = sum(x * x for x in a) ** 0.5
         nb = sum(x * x for x in b) ** 0.5
         return dot / (na * nb + 1e-9)

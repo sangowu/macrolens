@@ -72,7 +72,7 @@ def fetch_eps_quarters(
     with conn.cursor() as cur:
         cur.execute(sql, {"tickers": list(tickers)})
         cols = [d.name for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
 
     # NUMERIC → float，避免 Decimal 混进 JSON
     for r in rows:
@@ -100,4 +100,4 @@ def audit_eps_coverage(conn: psycopg.Connection) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(sql)
         cols = [d.name for d in cur.description]
-        return [dict(zip(cols, r)) for r in cur.fetchall()]
+        return [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]

@@ -12,18 +12,15 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from worker.data_refresh_worker import (
-    check_price_freshness,
-    check_earnings_freshness,
-    check_and_warn_freshness,
-    PRICE_STALE_DAYS,
     EARNINGS_STALE_DAYS,
+    PRICE_STALE_DAYS,
+    check_and_warn_freshness,
+    check_earnings_freshness,
+    check_price_freshness,
 )
-
 
 # ── mock conn 工厂 ────────────────────────────────────────
 
@@ -144,7 +141,7 @@ class TestRefreshTickerDryRun:
         with patch("worker.data_refresh_worker.fetch_price_history") as mock_p, \
              patch("worker.data_refresh_worker.fetch_earnings_history") as mock_e, \
              patch("worker.data_refresh_worker._log_result"):
-            result = refresh_ticker(conn, "GOOGL", force=False, dry_run=False)
+            refresh_ticker(conn, "GOOGL", force=False, dry_run=False)
 
         mock_p.assert_not_called()
         mock_e.assert_not_called()

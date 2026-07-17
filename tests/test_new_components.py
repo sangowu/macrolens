@@ -7,21 +7,20 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agent.synthesizer import _validate_citations, _format_context, _compute_executor
 from agent.planner import plan, plan_scoped
-
+from agent.synthesizer import _compute_executor, _format_context, _validate_citations
 
 # ── Mock LLM ──────────────────────────────────────────────
 
 class MockLLM:
-    provider = "anthropic"
+    provider = "gemini"
 
     def __init__(self, tool_responses: dict[str, dict] | None = None, chat_response: str = ""):
         self._tool_responses = tool_responses or {}
@@ -174,8 +173,9 @@ class TestComputeExecutor:
 
 class TestExecutorMacroSeries:
     def test_string_normalized_to_list(self):
-        from agent.executor import _search_macro
         from unittest.mock import MagicMock
+
+        from agent.executor import _search_macro
 
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -204,14 +204,14 @@ class TestSourcesFilter:
         ]
 
     def test_only_cited_shown(self):
-        from ui.app import _build_sources_md
+        from ui.formatting import _build_sources_md
         result = _build_sources_md(self._ctx(), answer="Revenue [1] and [3].")
         assert "Revenue 1" in result
         assert "Revenue 3" in result
         assert "Revenue 2" not in result
 
     def test_no_answer_shows_all(self):
-        from ui.app import _build_sources_md
+        from ui.formatting import _build_sources_md
         result = _build_sources_md(self._ctx(), answer="")
         assert "Revenue 1" in result
         assert "Revenue 2" in result
@@ -223,6 +223,7 @@ class TestSourcesFilter:
 class TestMemoryExtract:
     def test_extract_returns_findings(self):
         from unittest.mock import MagicMock
+
         import psycopg
 
         llm = MockLLM(tool_responses={
@@ -266,6 +267,7 @@ class TestContextPrecision:
 
     def _run(self, relevance: list[bool], reason: str = "test") -> dict:
         import json
+
         from eval.metrics import context_precision
 
         llm = MockLLM(chat_response=json.dumps({"relevance": relevance, "reason": reason}))
@@ -309,6 +311,7 @@ class TestContextRecall:
 
     def _run(self, response: dict) -> dict:
         import json
+
         from eval.metrics import context_recall
 
         llm = MockLLM(chat_response=json.dumps(response))
