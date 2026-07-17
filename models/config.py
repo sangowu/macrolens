@@ -31,20 +31,19 @@ class RemoteConfig(BaseModel):
     ssh: SSHConfig | None = None
 
 
-class OnlineEmbeddingConfig(BaseModel):
-    provider: Literal["voyage", "openai"] = "voyage"
-    model: str = "voyage-3-large"
+class LocalServerEmbeddingConfig(BaseModel):
+    """本地 llama.cpp embedding server（OpenAI 兼容 endpoint）。"""
+    base_url: str = "http://127.0.0.1:8081/v1"
+    model: str = "qwen3-embedding"
     dim: int = 1024
-    api_key_env: str = "VOYAGE_API_KEY"
-    base_url: str | None = None   # OpenAI-compatible 第三方服务（ModelScope 等）
 
 
 class EmbeddingConfig(BaseModel):
-    backend: Literal["local_bge", "local_qwen", "remote", "online"] = "local_bge"
+    backend: Literal["local_bge", "local_qwen", "remote", "local_server"] = "local_server"
     local_bge: LocalBGEConfig = Field(default_factory=LocalBGEConfig)
     local_qwen: LocalQwenConfig = Field(default_factory=LocalQwenConfig)
     remote: RemoteConfig = Field(default_factory=RemoteConfig)
-    online: OnlineEmbeddingConfig = Field(default_factory=OnlineEmbeddingConfig)
+    local_server: LocalServerEmbeddingConfig = Field(default_factory=LocalServerEmbeddingConfig)
 
 
 class LocalRerankerConfig(BaseModel):

@@ -26,16 +26,10 @@ def create_embedding(cfg: AppConfig) -> EmbeddingBackend:
         from models.embedding.remote import RemoteEmbedding
         return RemoteEmbedding(base_url=cfg.embedding.remote.base_url)
 
-    if backend == "online":
-        from models.embedding.online import OnlineEmbedding
-        c = cfg.embedding.online
-        return OnlineEmbedding(
-            provider=c.provider,
-            model=c.model,
-            dim=c.dim,
-            api_key=os.environ[c.api_key_env],
-            base_url=c.base_url,
-        )
+    if backend == "local_server":
+        from models.embedding.local_server import LocalServerEmbedding
+        c = cfg.embedding.local_server
+        return LocalServerEmbedding(base_url=c.base_url, model=c.model, dim=c.dim)
 
     raise ValueError(f"Unknown embedding backend: {backend!r}")
 

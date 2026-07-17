@@ -105,7 +105,7 @@ Task mode retrieves relevant prior findings from `research_memory` before enteri
 
 ```
 LLM           Gemini (primary) / Anthropic Claude (fallback)
-Embedding     Qwen3-Embedding-0.6B dim=1024 (ModelScope) / BGE-M3 (fallback)
+Embedding     Qwen3-Embedding-0.6B dim=1024 (local llama.cpp F16) / BGE-M3 (fallback)
 Reranker      Qwen3-Rerank (DashScope) / BGE-Reranker-v2-m3 (fallback)
 Database      PostgreSQL 17 + pgvector (HNSW index, port 5433)
 Framework     FastAPI · Gradio · uv

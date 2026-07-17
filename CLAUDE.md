@@ -9,6 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Common Commands
 
 ```bash
+# 本地 embedding server（llama.cpp，检索/入库/评估前必须先起）
+D:\Python_Projects\llama.cpp\llama-server.exe -m D:\Python_Projects\llama.cpp\models\Qwen3-Embedding-0.6B-f16.gguf --embedding --pooling last -ngl 99 -c 2048 -b 2048 -ub 2048 --host 127.0.0.1 --port 8081
+
 # 启动三个服务（分别开终端）
 uv run ui/app.py                              # Gradio UI  :7860
 uv run uvicorn api.tasks:app --port 7878      # Task API   :7878
@@ -46,6 +49,8 @@ Plan  →  Execute  →  Critique  →  (最多 3 轮)  →  Synthesize
 ```
 
 每轮都把 `missing_hint` 和 `searched_queries` 带回 Planner，避免重复检索。
+
+**域外前置过滤**：第一轮 `plan_scoped()` 返回 `(in_scope, reject_reason, sub_queries)`。完全域外的问题（天气、通用编程、闲聊）判 `in_scope=false`，`per_loop.run()` / UI 直接短路返回 `reject_reason`，不进检索。数据缺失/推测型问题（未来数据、未入库 ticker、跨源比较）仍属域内，交下游 Synthesizer 拒答。判定只依赖 Planner（Gemini），不依赖 embedding。
 
 ### 四个 Agent 组件
 
@@ -87,7 +92,7 @@ docker run --gpus all -p 6006:8000 macrolens-model-server
 唯一配置入口：`config.yaml`。`models/config.py::load_config()` 读取，传给 `models/factory.py` 工厂方法。
 
 切换 LLM：修改 `config.yaml` 的 `llm.provider`（`gemini`/`anthropic`）和 `llm.model`。  
-切换 Embedding：修改 `embedding.backend`（`online`/`local_bge`/`local_qwen`/`remote`）。
+切换 Embedding：修改 `embedding.backend`（`local_server`/`local_bge`/`local_qwen`/`remote`）。默认 `local_server`——本地 llama.cpp 跑 Qwen3-Embedding-0.6B（F16 GGUF），OpenAI 兼容 endpoint（`http://127.0.0.1:8081/v1`），无需外部 API key。启动：`llama-server -m Qwen3-Embedding-0.6B-f16.gguf --embedding --pooling last -ngl 99 --port 8081`。
 
 **注意**：Gemini pro 系列默认启用 AFC（Automatic Function Calling），会破坏 `chat_agentic` 的手动 tool 执行循环。当前稳定配置是 `gemini-3.1-flash-lite-preview`。
 

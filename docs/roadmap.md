@@ -1,6 +1,6 @@
 # MacroLens 项目路线图
 
-> 迭代历史、当前状态与未来方向。最后更新：2026-05（v21）。
+> 迭代历史、当前状态与未来方向。最后更新：2026-07（v22）。
 
 ---
 
@@ -130,6 +130,40 @@
 
 ---
 
+## v22：域外过滤 + Embedding 本地化（2026-07）
+
+### 域外问题前置过滤（`agent/planner.py` + `per_loop.py` + `ui/app.py`）
+
+- `create_query_plan` schema 新增 `in_scope`（bool）/ `reject_reason`（str）字段，`sub_queries` 的 `minItems` 由 1 放宽为 0
+- SYSTEM_PROMPT 新增 `SCOPE GATING`：完全域外的问题（天气、通用编程、闲聊等）判 `in_scope=false`，返回空子查询
+- `plan_scoped()` 返回 `(in_scope, reject_reason, sub_queries)`；`per_loop.run()` / UI 在第一轮短路，域外问题**不进检索**，省掉 3 轮 PER Loop 的检索与 LLM 开销
+- 关键约束：数据缺失/推测型问题（2030 营收、未入库 ticker、跨源比较）仍属域内，交下游拒答——判定只依赖 Planner（Gemini），不依赖 embedding
+
+### 新增 Set F：域外拒答评估集（`eval/questions.py`）
+
+- 5 题纯域外（天气 / Python 语法 / 食谱 / Spotify / 世界杯），期望 `in_scope=false` 短路、`context_items=0`
+- 与 Set C 区分：Set C 是"域内但数据缺失/推测"（管道内拒答），Set F 是"完全域外"（Planner 前置拦截）
+
+### Embedding 本地化：ModelScope → 本地 llama.cpp
+
+- 从 ModelScope 云端 API 迁移到本地 llama.cpp server：`Qwen3-Embedding-0.6B-f16.gguf`（F16 无损），`--pooling last`，OpenAI 兼容 endpoint（`:8081`），**无需任何外部 API key**
+- 新增 `local_server` embedding backend；移除 `online` backend、`OnlineEmbedding` 类、`MODELSCOPE_API_KEY`
+- 兼容性验证：doc 侧 cosine **0.99998**，库里 4 万条 SEC 向量**无需重灌**
+- `--pooling last` 是复现 ModelScope 编码的关键（Qwen3-Embedding 用 last-token pooling）
+
+**评估验证（v22）**
+
+| 验证项 | 结果 |
+|--------|------|
+| Set F 域外拒答 | 5/5 短路，`context_items=0`，正确拒答 |
+| Set C 不误杀 | 5/5 `in_scope=true` 进检索（C02 ctx=80、C05 ctx=37 护栏成立）|
+| Set C 端到端 ragas | **0.646**（本地 embedding + reranker），高于 v21 基线 0.592 |
+| Embedding 迁移 | 检索质量无损，doc cosine 0.99998 |
+
+> 说明：v22 仅端到端重跑 Set C（验证过滤不误杀 + 本地 embedding 生效），未跑全套 A–F，故版本表 ragas 一列标注 Set C 分数。
+
+---
+
 ## 近期计划（本月）
 
 - [x] **修复 D03 Planner 路由**：MANDATORY MULTI-SOURCE RULE + 示例更新 ✅
@@ -166,7 +200,8 @@
 - [ ] **新闻数据源**：Guardian API 已有基础（`ingest_events_guardian.py`），扩展为结构化新闻 chunk 入库
 - [ ] **跨资产扩展**：支持 ETF（SPY / QQQ）和宏观 ETF，实现股债相关性分析
 - [ ] **结构化投研报告**：PDF 输出，含 P/E 历史图表、EPS 趋势图、竞争对手对比矩阵
-- [ ] **评估集扩展**：Set E（实时数据类）、Set F（多轮对话类）
+- [ ] **评估集扩展**：Set E（实时数据类）、Set G（多轮对话类）
+  - 注：Set F 已用于域外拒答（v22），多轮对话顺延为 Set G
 
 ---
 
@@ -184,3 +219,4 @@
 | v19 | Reranker 接入（Docker BGE-reranker-v2-m3），candidate_k=20 | 0.699 |
 | v20 | candidate_k 20→50，reranker 候选池扩大 | 0.711 |
 | v21 | Critic 智能窗口 + RETRIEVAL GAP 恢复，性能优化阶段终版 | 0.725 |
+| v22 | 域外前置过滤 + Set F 拒答集 + Embedding 本地化（llama.cpp）| Set C 0.646 |
