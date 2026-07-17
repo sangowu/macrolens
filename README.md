@@ -223,6 +223,8 @@ Key improvements from v13 → v14 (monthly aggregation + eval fixes):
 | API | FastAPI |
 | UI | Gradio |
 | Evaluation | Custom LLM-as-Judge (Precision@K + atomic recall) + chunk ablation |
+| Observability | Langfuse (LLM tracing: token / cost / latency), fail-safe & optional |
+| Quality | ruff (lint) + GitHub Actions CI (`pytest` on mock LLM) |
 
 ---
 
