@@ -28,9 +28,16 @@ from agent.synthesizer import synthesize
 from models.base import RerankerBackend
 from models.config import load_config
 from models.factory import create_embedding, create_llm_client, create_reranker
+from models.llm.tracing import trace_span
 
 
-def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: int = 3, verbose: bool = False, reranker: RerankerBackend | None = None) -> str:
+def run(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: int = 3, verbose: bool = False, reranker: RerankerBackend | None = None) -> tuple[str, list]:
+    """PER Loop 入口。用一个 Langfuse span 聚合本次问答的全部 LLM 调用为一棵 trace。"""
+    with trace_span("per_loop", {"question": question, "max_iter": max_iter}):
+        return _run_impl(question, cfg, conn, embedder, llm, max_iter=max_iter, verbose=verbose, reranker=reranker)
+
+
+def _run_impl(question: str, cfg, conn: psycopg.Connection, embedder, llm, max_iter: int = 3, verbose: bool = False, reranker: RerankerBackend | None = None) -> tuple[str, list]:
     all_context: list[dict] = []
     history: list[dict] = []
     missing_hint = ""

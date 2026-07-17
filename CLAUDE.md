@@ -70,6 +70,14 @@ Plan  →  Execute  →  Critique  →  (最多 3 轮)  →  Synthesize
 
 实现：`models/llm/gemini_client.py`（当前唯一 provider），通过 `models/factory.py::create_llm_client()` 按 `config.yaml` 实例化。新增 provider 只需实现 `LLMClient` Protocol 并在 factory 加分支。
 
+### 可观测性（Langfuse）
+
+所有 LLM 调用经 `models/llm/tracing.py` 失败安全封装接入 Langfuse Cloud：
+- 配置 `.env` 中三个 `LANGFUSE_*` 变量即启用；**未配置则完全 no-op**，任何追踪异常都被吞掉，绝不影响主流程或 CI。
+- `gemini_client.py` 三个方法各记录一条 generation（model / input / output / token；延迟由 start-end 自动算）。
+- `per_loop.run()` 用父 span 把一次问答的 Plan / Critic / Synthesizer 全部 generation 聚合成**一棵 trace 树**，可看每步 token / 成本 / 延迟。
+- 短命进程（CLI / worker / eval）经 `atexit` 自动 `flush()`，数据不丢失。
+
 ### 数据源路由（Executor）
 
 `agent/executor.py` 按子查询的 `sources` 字段路由：
