@@ -14,6 +14,7 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 
@@ -86,9 +87,14 @@ def run_query(
     question: str,
     history: list[dict],
     max_iter: int,
-) -> tuple[list[dict], str, str, str]:
+) -> Iterator[tuple[list[dict], str, str, str]]:
+    """流式执行 PER Loop：各阶段 yield 中间进度到 UI，最后 yield 完整答案。
+
+    generator 形式让用户实时看到"规划 → 检索 → 评估 → 生成"进度，
+    而非对着空白等待整轮结束。"""
     if not question.strip():
-        return history, "", "", "请输入问题"
+        yield history, "", "", "请输入问题"
+        return
 
     t_start = time.time()
     all_context: list[dict] = []
@@ -101,6 +107,13 @@ def run_query(
     logger.info("=" * 60)
     logger.info(f"[QUERY] {question}")
     logger.info(f"[CONFIG] max_iter={max_iter}")
+
+    # 立即回显用户消息 + assistant 占位，进入流式进度更新
+    history = history + [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": "🔍 规划检索中…"},
+    ]
+    yield history, "", "", "规划中…"
 
     with psycopg.connect(cfg.db.dsn) as conn:
         register_vector(conn)
@@ -117,10 +130,7 @@ def run_query(
                 if not in_scope:
                     logger.info(f"[PLAN] out-of-scope, rejecting | reason={reject_reason}")
                     answer = reject_reason or "该问题超出 MacroLens 的范围（MAG7 公司与美国宏观经济）。"
-                    history = history + [
-                        {"role": "user", "content": question},
-                        {"role": "assistant", "content": answer},
-                    ]
+                    history[-1]["content"] = answer
                     stats_md = _build_stats_md(
                         iterations=1,
                         n_context=0,
@@ -128,7 +138,8 @@ def run_query(
                         output_tokens=_count_tokens_approx(answer),
                         elapsed=time.time() - t_start,
                     )
-                    return history, "_超出范围，未检索_", stats_md, ""
+                    yield history, "_超出范围，未检索_", stats_md, ""
+                    return
             else:
                 already = ", ".join(f'"{q}"' for q in searched_queries)
                 prompt = (
@@ -143,6 +154,9 @@ def run_query(
             logger.info(f"[PLAN] {len(sub_queries)} sub-queries:")
             for sq in sub_queries:
                 logger.info(f"  sources={sq.get('sources')} filters={sq.get('filters')} | {sq.get('query', '')[:80]}")
+
+            history[-1]["content"] = f"📚 第 {iteration} 轮：{len(sub_queries)} 个子查询检索中…"
+            yield history, "", "", f"检索中（第 {iteration}/{max_iter} 轮）"
 
             new_context = execute(sub_queries, conn, embedder, cfg.llm)
 
@@ -160,6 +174,9 @@ def run_query(
 
             logger.info(f"[EXEC] retrieved={len(new_context)} new={added} total_context={len(all_context)}")
 
+            history[-1]["content"] = f"🔎 已检索 {len(all_context)} 条证据，评估充分性…"
+            yield history, "", "", f"评估中（第 {iteration}/{max_iter} 轮）"
+
             is_sufficient, missing_hint = critique(question, all_context, llm)
             input_tokens_approx += _count_tokens_approx(_format_context(all_context[:20]))
 
@@ -167,6 +184,9 @@ def run_query(
 
             if is_sufficient or iteration == max_iter:
                 break
+
+        history[-1]["content"] = "✍️ 综合生成答案中…"
+        yield history, "", "", "生成答案中…"
 
         answer = synthesize(question, all_context, llm, max_tokens=cfg.llm.max_tokens)
         output_tokens_approx += _count_tokens_approx(answer)
@@ -176,11 +196,7 @@ def run_query(
     logger.info(f"[ANSWER] {answer[:200].replace(chr(10), ' ')}...")
     logger.info(f"[STATS] iter={iterations_done} context={len(all_context)} in_tok~{input_tokens_approx} out_tok~{output_tokens_approx} time={t_elapsed:.1f}s")
 
-    history = history + [
-        {"role": "user", "content": question},
-        {"role": "assistant", "content": answer},
-    ]
-
+    history[-1]["content"] = answer
     sources_md = _build_sources_md(all_context, answer)
     stats_md = _build_stats_md(
         iterations=iterations_done,
@@ -190,7 +206,7 @@ def run_query(
         elapsed=t_elapsed,
     )
 
-    return history, sources_md, stats_md, ""
+    yield history, sources_md, stats_md, ""
 
 
 # ══════════════════════════════════════════════════════════
@@ -360,7 +376,7 @@ with gr.Blocks(title="MacroLens") as demo:
             )
 
             def on_submit(question, history, max_iter):
-                return run_query(question, history or [], int(max_iter))
+                yield from run_query(question, history or [], int(max_iter))
 
             submit_btn.click(
                 fn=on_submit,
