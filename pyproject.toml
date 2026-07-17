@@ -26,6 +26,7 @@ dependencies = [
     "yfinance>=0.2.50",
     "markdown>=3.7",
     "langfuse>=4.14.0",
+    "mcp>=1.28.1",
 ]
 
 [dependency-groups]
