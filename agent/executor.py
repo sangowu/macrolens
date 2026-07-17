@@ -19,7 +19,7 @@ RRF_K = 60
 
 SEC_RRF_SQL = """
 WITH semantic AS (
-    SELECT id, content, section, doc_type, period_end, fiscal_year,
+    SELECT id, content, section, doc_type, period_end, fiscal_year, company,
            ROW_NUMBER() OVER (ORDER BY embedding <=> %(vec)s::vector) AS sem_rank
     FROM sec_chunks
     WHERE embedding IS NOT NULL
@@ -30,7 +30,7 @@ WITH semantic AS (
     LIMIT %(candidate_k)s
 ),
 lexical AS (
-    SELECT id, content, section, doc_type, period_end, fiscal_year,
+    SELECT id, content, section, doc_type, period_end, fiscal_year, company,
            ROW_NUMBER() OVER (
                ORDER BY ts_rank(content_tsv, websearch_to_tsquery('english', %(query)s)) DESC
            ) AS lex_rank
@@ -49,12 +49,13 @@ rrf AS (
         COALESCE(s.doc_type, l.doc_type)   AS doc_type,
         COALESCE(s.period_end, l.period_end) AS period_end,
         COALESCE(s.fiscal_year, l.fiscal_year) AS fiscal_year,
+        COALESCE(s.company, l.company)         AS company,
         (COALESCE(1.0/({rrf_k}+s.sem_rank), 0)
          + COALESCE(1.0/({rrf_k}+l.lex_rank), 0)) AS rrf_score
     FROM semantic s
     FULL OUTER JOIN lexical l ON s.id = l.id
 )
-SELECT id, content, section, doc_type, period_end, fiscal_year, rrf_score
+SELECT id, content, section, doc_type, period_end, fiscal_year, company, rrf_score
 FROM rrf
 ORDER BY rrf_score DESC
 LIMIT %(candidate_k)s
@@ -191,7 +192,8 @@ def _search_sec(
             "doc_type": r[3],
             "period_end": str(r[4]) if r[4] else None,
             "fiscal_year": r[5],
-            "rrf_score": float(r[6]),
+            "company": r[6],
+            "rrf_score": float(r[7]),
         }
         for r in rows
     ]
