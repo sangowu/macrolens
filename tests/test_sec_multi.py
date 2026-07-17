@@ -10,18 +10,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agent.executor import _build_company_filter, _ALLOWED_COMPANIES
+from agent.executor import _ALLOWED_COMPANIES, _build_company_filter
 from agent.planner import plan
-
 
 # ── MockLLM（复用 test_new_components 的模式）────────────
 
 class MockLLM:
-    provider = "anthropic"
+    provider = "gemini"
 
     def __init__(self, tool_responses: dict | None = None):
         self._tool_responses = tool_responses or {}
@@ -153,7 +150,7 @@ class TestSecRrfSqlTemplate:
         assert "{company_filter}" in SEC_RRF_SQL
 
     def test_sql_formats_without_filter(self):
-        from agent.executor import SEC_RRF_SQL, RRF_K
+        from agent.executor import RRF_K, SEC_RRF_SQL
         sql = SEC_RRF_SQL.format(
             section_filter="", company_filter="", year_filter="", rrf_k=RRF_K
         )
@@ -161,7 +158,7 @@ class TestSecRrfSqlTemplate:
         assert "ORDER BY rrf_score DESC" in sql
 
     def test_sql_formats_with_company_filter(self):
-        from agent.executor import SEC_RRF_SQL, RRF_K
+        from agent.executor import RRF_K, SEC_RRF_SQL
         sql = SEC_RRF_SQL.format(
             section_filter="",
             company_filter="AND company IN ('GOOGL','MSFT')",
@@ -193,8 +190,9 @@ class TestTickerCikMap:
 
     def test_unknown_ticker_returns_zero(self):
         """ingest_ticker 对未知 ticker 直接返回 0，不抛异常。"""
-        from ingestion.ingest_sec_multi import ingest_ticker
         from unittest.mock import MagicMock
+
+        from ingestion.ingest_sec_multi import ingest_ticker
         conn = MagicMock()
         embedder = MagicMock()
         cfg = MagicMock()

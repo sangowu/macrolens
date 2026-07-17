@@ -50,8 +50,8 @@ chunking:
   chunk_overlap: 128
 
 llm:
-  provider: gemini          # anthropic | gemini
-  model: gemini-3.1-flash-lite-preview    # anthropic: claude-sonnet-4-6 / gemini: gemini-3.1-pro-preview | gemini-3.1-flash-lite-preview
+  provider: gemini
+  model: gemini-3.1-flash-lite-preview    # gemini-3.1-pro-preview | gemini-3.1-flash-lite-preview
   max_tokens: 4096
   temperature: 0.0
   top_k: 12                   # 每个子查询返回的最终 chunk 数

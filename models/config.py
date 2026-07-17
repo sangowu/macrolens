@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -82,17 +83,17 @@ class ChunkingConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    provider: Literal["anthropic", "gemini"] = "anthropic"
-    model: str = "claude-sonnet-4-6"
+    provider: Literal["gemini"] = "gemini"
+    model: str = "gemini-3.1-flash-lite-preview"
     max_tokens: int = 4096
     temperature: float = 0.0
     top_k: int = 8
     candidate_k: int = 20
-    api_key_env: str = "ANTHROPIC_API_KEY"  # 指向 .env 中的变量名
+    api_key_env: str = "GEMINI_API_KEY"  # 指向 .env 中的变量名
 
 
 class JudgeLLMConfig(BaseModel):
-    provider: Literal["anthropic", "gemini"] = "gemini"
+    provider: Literal["gemini"] = "gemini"
     model: str = "gemini-2.5-pro"
     api_key_env: str = "GEMINI_API_KEY"
 

@@ -68,7 +68,7 @@ Plan  →  Execute  →  Critique  →  (最多 3 轮)  →  Synthesize
 - `chat_with_tools()` — 单次强制 tool call，返回 tool input dict（用于 Planner/Critic/Memory）
 - `chat_agentic()` — 多轮 agentic loop，LLM 可反复调用 tool 直到 end_turn（用于 Synthesizer）
 
-实现：`models/llm/anthropic_client.py` 和 `models/llm/gemini_client.py`，通过 `models/factory.py::create_llm_client()` 按 `config.yaml` 实例化。
+实现：`models/llm/gemini_client.py`（当前唯一 provider），通过 `models/factory.py::create_llm_client()` 按 `config.yaml` 实例化。新增 provider 只需实现 `LLMClient` Protocol 并在 factory 加分支。
 
 ### 数据源路由（Executor）
 
@@ -91,7 +91,7 @@ docker run --gpus all -p 6006:8000 macrolens-model-server
 
 唯一配置入口：`config.yaml`。`models/config.py::load_config()` 读取，传给 `models/factory.py` 工厂方法。
 
-切换 LLM：修改 `config.yaml` 的 `llm.provider`（`gemini`/`anthropic`）和 `llm.model`。  
+切换 LLM 模型：修改 `config.yaml` 的 `llm.model`（当前 provider 为 `gemini`）。  
 切换 Embedding：修改 `embedding.backend`（`local_server`/`local_bge`/`local_qwen`/`remote`）。默认 `local_server`——本地 llama.cpp 跑 Qwen3-Embedding-0.6B（F16 GGUF），OpenAI 兼容 endpoint（`http://127.0.0.1:8081/v1`），无需外部 API key。启动：`llama-server -m Qwen3-Embedding-0.6B-f16.gguf --embedding --pooling last -ngl 99 --port 8081`。
 
 **注意**：Gemini pro 系列默认启用 AFC（Automatic Function Calling），会破坏 `chat_agentic` 的手动 tool 执行循环。当前稳定配置是 `gemini-3.1-flash-lite-preview`。

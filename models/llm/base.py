@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from typing import Callable, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
 class LLMClient(Protocol):
-    """统一 LLM 调用接口，屏蔽 Anthropic / Gemini 差异。"""
+    """统一 LLM 调用接口。当前实现 Gemini；新增 provider 只需实现本 Protocol。"""
 
-    provider: str  # "anthropic" | "gemini"
+    provider: str  # "gemini"
 
     def chat(
         self,

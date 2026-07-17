@@ -213,7 +213,7 @@ Key improvements from v13 → v14 (monthly aggregation + eval fixes):
 
 | Layer | Technology |
 |-------|-----------|
-| LLM | Gemini / Claude (configurable) |
+| LLM | Gemini (pluggable via `LLMClient` Protocol) |
 | Embedding | Qwen3-Embedding-0.6B (local llama.cpp, F16 GGUF) / BGE-M3 |
 | Reranker | qwen3-rerank (DashScope) / BGE-Reranker-v2-m3 |
 | Vector DB | PostgreSQL 17 + pgvector (HNSW index) |

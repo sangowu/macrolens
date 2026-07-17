@@ -104,7 +104,7 @@ Task 模式在进入 PER Loop 前，先从 `research_memory` 检索相关历史�
 ## 技术栈
 
 ```
-LLM           Gemini（主）/ Anthropic Claude（备）
+LLM           Gemini（可插拔，经 LLMClient Protocol）
 Embedding     Qwen3-Embedding-0.6B dim=1024 (本地 llama.cpp F16) / BGE-M3（备）
 Reranker      Qwen3-Rerank (DashScope) / BGE-Reranker-v2-m3（备）
 数据库        PostgreSQL 17 + pgvector（HNSW 索引，port 5433）
@@ -148,7 +148,6 @@ agent/
 
 models/
   llm/base.py           LLMClient Protocol
-  llm/anthropic_client.py
   llm/gemini_client.py
   embedding/            BGE-M3 / Qwen3 / remote / online
   reranker/             BGE-Reranker / Qwen3-Rerank / remote
